@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Khalifeh Tunnel Panel</title>
+    <style>
+        body { background: #0c0f12; color: #4af626; font-family: 'Courier New', monospace; padding: 30px; }
+        h2 { border-bottom: 2px solid #4af626; padding-bottom: 10px; text-shadow: 0 0 10px #4af626; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-top: 20px; }
+        .box { background: #131a22; border: 1px solid #1f2d3d; padding: 20px; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .active { color: #00ff88; font-weight: bold; text-shadow: 0 0 5px #00ff88; }
+        .inactive { color: #ff3366; font-weight: bold; text-shadow: 0 0 5px #ff3366; }
+        .actions { margin-top: 15px; }
+        button { background: #1a2432; color: #4af626; border: 1px solid #4af626; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: bold; margin-right: 5px;}
+        button:hover { background: #4af626; color: #0c0f12; box-shadow: 0 0 10px #4af626; }
+    </style>
+</head>
+<body>
+    <h2>🔥 KHALIFEH TUNNEL WEB DASHBOARD</h2>
+    <div class="grid" id="container"></div>
+
+    <script>
+        async function fetchStatus() {
+            let r = await fetch('/api/status');
+            let data = await r.json();
+            let html = '';
+            for (let svc in data) {
+                let cls = data[svc] === 'active' ? 'active' : 'inactive';
+                html += `
+                <div class="box">
+                    <h3>📌 ${svc.replace('khalifeh-', '')}</h3>
+                    <p>Status: <span class="${cls}">${data[svc].toUpperCase()}</span></p>
+                    <div class="actions">
+                        <button onclick="control('${svc}','start')">START</button>
+                        <button onclick="control('${svc}','stop')">STOP</button>
+                        <button onclick="control('${svc}','restart')">RESTART</button>
+                    </div>
+                </div>`;
+            }
+            document.getElementById('container').innerHTML = html;
+        }
+        async function control(name, act) {
+            await fetch(`/api/${act}/${name}`);
+            fetchStatus();
+        }
+        setInterval(fetchStatus, 4000);
+        fetchStatus();
+    </script>
+</body>
+</html>
