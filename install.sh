@@ -1,9 +1,8 @@
 #!/bin/bash
 # =================================================================
-#  KHALIFEH TUNNEL v2 - AUTOMATED GITHUB MASTER INSTALLER
+#  KHALIFEH TUNNEL PRO - AUTO MASTER INSTALLER (BUG-FREE RESILIENT)
 # =================================================================
 
-# ۱. بررسی دسترسی روت
 if [[ $EUID -ne 0 ]]; then
    echo -e "\033[0;31m[-] Please run this script as root (sudo).\033[0m" 
    exit 1
@@ -15,48 +14,42 @@ CFG_DIR="$BASE_DIR/configs"
 MOD_DIR="$BASE_DIR/modules"
 WEB_DIR="$BASE_DIR/web"
 
-# ۲. پاک‌سازی کامل آثار نصب خراب قبلی برای جلوگیری از تداخل
-echo "[*] Cleaning up any previous installation..."
-systemctl stop khalifeh-web khalifeh-failover >/dev/null 2>&1
+# پاک‌سازی کامل سرویس‌های قبلی جهت جلوگیری از تداخل شل‌ها و پورت‌ها
+systemctl stop khalifeh-web khalifeh-failover khalifeh-rathole-server khalifeh-rathole-client khalifeh-local-proxy >/dev/null 2>&1
 rm -rf "$BASE_DIR"
 rm -f /usr/local/bin/khalifeh
 
-# ۳. ایجاد دایرکتوری‌های استاندارد سیستم
-echo "[*] Creating system directory architecture..."
 mkdir -p "$BIN_DIR" "$CFG_DIR" "$MOD_DIR" "$WEB_DIR/templates"
 
-# ۴. نصب وابستگی‌های پکیج لینوکس
-echo "[*] Installing required system packages..."
-apt update -y && apt install -y curl wget jq unzip openssl python3-flask python3-pip -y
-
-echo "[*] Deploying system framework components..."
+echo "[*] Upgrading OS core dependencies..."
+apt update -y && apt install -y curl wget jq unzip openssl python3-flask python3-pip net-tools sshpass -y
 
 # =================================================================
-# الف) ساخت خودکار ماژول rathole.sh
+# ۱. ماژول پایدار رتهول (rathole.sh)
 # =================================================================
 cat << 'EOF' > "$MOD_DIR/rathole.sh"
 #!/bin/bash
 rathole_menu() {
     while true; do
         banner
-        echo -e "${CYAN}=== Rathole Config Module ===${NC}"
-        echo "1) Configure as IRAN (Server)"
-        echo "2) Configure as KHAREJ (Client)"
-        echo "3) Service Logs"
-        echo "0) Back to Main Menu"
-        read -p "Choice: " c
+        echo -e "${CYAN}=== Rathole Tunnel Manager ===${NC}"
+        echo "1) Configure IRAN Server (Server Mode)"
+        echo "2) Configure KHAREJ Server (Client Mode)"
+        echo "3) Live Connection Logs"
+        echo "0) Back"
+        read -p "Selection: " c
         case $c in
             1) rathole_iran ;;
             2) rathole_kharej ;;
-            3) journalctl -u khalifeh-rathole-server -u khalifeh-rathole-client -n 50 --no-pager; read -p "Press Enter..." ;;
+            3) journalctl -u khalifeh-rathole-server -u khalifeh-rathole-client -n 30 --no-pager; read -p "Press Enter..." ;;
             0) break ;;
         esac
     done
 }
 rathole_iran() {
-    read -p "Enter Bind Port [Default: 2333]: " port
+    read -p "Enter Tunnel Bind Port [Default: 2333]: " port
     port=${port:-2333}
-    read -p "Enter Ports to forward (comma separated, e.g. 80,443): " ports
+    read -p "Enter X-UI Ports to tunnel (comma separated, e.g. 443,8080): " ports
     token=$(openssl rand -hex 16)
     cat <<EOF > /opt/khalifeh/configs/rathole-server.toml
 [server]
@@ -70,23 +63,28 @@ EOF
         p=$(echo $p | xargs)
         cat <<EOF >> /opt/khalifeh/configs/rathole-server.toml
 [server.services.port_$p]
-bind_addr = "127.0.0.1:$p"
+bind_addr = "0.0.0.0:$p"
 EOF
     done
+    
+    # ساخت دیمن با قابلیت تزریق مستقیم پروکسی محلی به هسته رتهول
     cat <<EOF > /etc/systemd/system/khalifeh-rathole-server.service
 [Unit]
 Description=Khalifeh Rathole Server
-After=network.target
+After=network.target khalifeh-local-proxy.service
+
 [Service]
+EnvironmentFile=-/opt/khalifeh/configs/proxy_env.conf
 ExecStart=/opt/khalifeh/bin/rathole /opt/khalifeh/configs/rathole-server.toml
 Restart=always
 RestartSec=3
+
 [Install]
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload && systemctl enable --now khalifeh-rathole-server
-    echo -e "${GREEN}[+] Rathole Server Started on port $port.${NC}"
-    echo -e "${YELLOW}[!] Share this token with Client: $token${NC}"
+    echo -e "${GREEN}[+] Iran Server active on tunnel port $port.${NC}"
+    echo -e "${YELLOW}[!] Secure Token for Kharej Node: $token${NC}"
     read -p "Press Enter..."
 }
 rathole_kharej() {
@@ -94,7 +92,7 @@ rathole_kharej() {
     read -p "Enter Iran Bind Port [Default: 2333]: " port
     port=${port:-2333}
     read -p "Enter Token: " token
-    read -p "Enter local ports to map (comma separated, e.g. 80,443): " ports
+    read -p "Enter local X-UI ports to forward (comma separated, e.g. 443,8080): " ports
     cat <<EOF > /opt/khalifeh/configs/rathole-client.toml
 [client]
 remote_addr = "$ip:$port"
@@ -122,129 +120,118 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload && systemctl enable --now khalifeh-rathole-client
-    echo -e "${GREEN}[+] Rathole Client Service Deployed.${NC}"
+    echo -e "${GREEN}[+] Kharej Server successfully linked to Iran!${NC}"
     read -p "Press Enter..."
 }
 EOF
 
 # =================================================================
-# ب) ساخت خودکار ماژول frp.sh
+# ۲. ماژول تصحیح پینگ با قابلیت راه‌اندازی اتوماتیک پس از ریستارت (ping_fix.sh)
 # =================================================================
-cat << 'EOF' > "$MOD_DIR/frp.sh"
+cat << 'EOF' > "$MOD_DIR/ping_fix.sh"
 #!/bin/bash
-frp_menu() {
+proxy_menu() {
     while true; do
         banner
-        echo -e "${CYAN}=== FRP v0.61.2 Module (Backup Route) ===${NC}"
-        echo "1) Configure FRPS (Iran)"
-        echo "2) Configure FRPC (Kharej)"
+        echo -e "${YELLOW}=== FIX PING: Self-Hosted Kharej Proxy Engine ===${NC}"
+        echo "1) Build & Enable Proxy Link (Run this on IRAN Server)"
+        echo "2) Disable Proxy Routing"
+        echo "3) Test Connection Health & Latency"
         echo "0) Back"
-        read -p "Choice: " c
-        case $c in
-            1) frp_iran ;;
-            2) frp_kharej ;;
+        read -p "Selection: " cp
+        case $cp in
+            1) deploy_internal_proxy ;;
+            2) disable_internal_proxy ;;
+            3) clear; echo "[*] Testing latency via proxy corridor..."; curl -I -s --connect-timeout 4 https://www.google.com | head -n 1; read -p "Press Enter..." ;;
             0) break ;;
         esac
     done
 }
-frp_iran() {
-    read -p "Enter FRP Bind Port [Default: 7000]: " port
-    port=${port:-7000}
-    read -p "Enter Token: " token
-    cat <<EOF > /opt/khalifeh/configs/frps.toml
-bindPort = $port
-auth.method = "token"
-auth.token = "$token"
-EOF
-    cat <<EOF > /etc/systemd/system/frps.service
-[Unit]
-Description=FRP Server
-After=network.target
-[Service]
-ExecStart=/opt/khalifeh/bin/frps -c /opt/khalifeh/configs/frps.toml
-Restart=always
-[Install]
-WantedBy=multi-user.target
-EOF
-    systemctl daemon-reload && systemctl enable --now frps
-    echo -e "${GREEN}[+] FRPS Installed successfully.${NC}"
-    read -p "Press Enter..."
-}
-frp_kharej() {
-    echo "FRP Client helper stub active."
-    read -p "Press Enter..."
-}
-EOF
+deploy_internal_proxy() {
+    echo -e "${CYAN}[*] Let's bridge Iran to your Kharej Server safely...${NC}"
+    read -p "Enter your KHAREJ Server IP: " kharej_ip
+    read -p "Enter KHAREJ SSH Port [Default: 22]: " kharej_ssh_port
+    kharej_ssh_port=${kharej_ssh_port:-22}
+    read -p "Enter KHAREJ Root Password: " kharej_pass
 
-# =================================================================
-# ج) ساخت خودکار ماژول hysteria2.sh
-# =================================================================
-cat << 'EOF' > "$MOD_DIR/hysteria2.sh"
+    # ذخیره مشخصات به صورت پایدار برای بالا آمدن خودکار پس از بوت شدن سرور
+    cat <<EOF > /opt/khalifeh/configs/ssh_creds.conf
+KHAREJ_IP="$kharej_ip"
+KHAREJ_PORT="$kharej_ssh_port"
+KHAREJ_PASS="$kharej_pass"
+EOF
+    chmod 600 /opt/khalifeh/configs/ssh_creds.conf
+
+    echo -e "${YELLOW}[*] Generating highly secure SSH Tunnel Proxy on port 1080...${NC}"
+    
+    # اسکریپت رانر برای بارگذاری کرنشال‌ها در محیط ایزوله دیمن لینوکس
+    cat << 'RUNNER' > /opt/khalifeh/bin/proxy_runner.sh
 #!/bin/bash
-hysteria_menu() {
-    while true; do
-        banner
-        echo -e "${CYAN}=== Hysteria2 Config Module ===${NC}"
-        echo "1) Setup Hysteria2 Server"
-        echo "2) Setup Hysteria2 Client"
-        echo "0) Back"
-        read -p "Choice: " c
-        case $c in
-            1) hy_server ;;
-            2) hy_client ;;
-            0) break ;;
-        esac
-    done
-}
-hy_server() {
-    read -p "Enter Port [Default: 443]: " port
-    port=${port:-443}
-    password=$(openssl rand -base64 12)
-    mkdir -p /etc/ssl/khalifeh
-    openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
-      -keyout /etc/ssl/khalifeh/key.pem -out /etc/ssl/khalifeh/cert.pem \
-      -days 3650 -subj "/CN=localhost" 2>/dev/null
-    cat <<EOF > /opt/khalifeh/configs/hysteria-server.yaml
-listen: :$port
-tls:
-  cert: /etc/ssl/khalifeh/cert.pem
-  key: /etc/ssl/khalifeh/key.pem
-auth:
-  type: password
-  password: "$password"
-EOF
-    cat <<EOF > /etc/systemd/system/hysteria2.service
+source /opt/khalifeh/configs/ssh_creds.conf
+exec /usr/bin/sshpass -p "$KHAREJ_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -N -D 127.0.0.1:1080 root@$KHAREJ_IP -p $KHAREJ_PORT
+RUNNER
+    chmod +x /opt/khalifeh/bin/proxy_runner.sh
+
+    # ایجاد سرویس دائمی فیکس پینگ
+    cat <<EOF > /etc/systemd/system/khalifeh-local-proxy.service
 [Unit]
-Description=Hysteria2 Server
+Description=Khalifeh Secure Fix-Ping Proxy Forwarder
 After=network.target
+
 [Service]
-ExecStart=/opt/khalifeh/bin/hysteria2 server -c /opt/khalifeh/configs/hysteria-server.yaml
+ExecStart=/bin/bash /opt/khalifeh/bin/proxy_runner.sh
 Restart=always
+RestartSec=5
+
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload && systemctl enable --now hysteria2
-    echo -e "${GREEN}[+] Hysteria2 Server active on UDP:$port${NC}"
-    read -p "Press Enter..."
+
+    systemctl daemon-reload
+    systemctl enable --now khalifeh-local-proxy
+    sleep 3
+
+    # فیکس نهایی: تزریق همزمان به کل سیستم عامل + دیمن اختصاصی رتهول
+    cat <<EOF > /opt/khalifeh/configs/proxy_env.conf
+http_proxy=socks5://127.0.0.1:1080
+https_proxy=socks5://127.0.0.1:1080
+all_proxy=socks5://127.0.0.1:1080
+HTTP_PROXY=socks5://127.0.0.1:1080
+HTTPS_PROXY=socks5://127.0.0.1:1080
+EOF
+
+    cat <<EOF > /etc/profile.d/khalifeh_proxy.sh
+export http_proxy="socks5://127.0.0.1:1080"
+export https_proxy="socks5://127.0.0.1:1080"
+export all_proxy="socks5://127.0.0.1:1080"
+EOF
+
+    # ری‌استارت سرویس رتهول برای اعمال شناسایی مسیر جدید پروکسی
+    systemctl restart khalifeh-rathole-server >/dev/null 2>&1
+
+    echo -e "${GREEN}[+] SUCCESS: Server Iran is now permanently proxied via Kharej Node!${NC}"
+    read -p "Press Enter to continue..."
 }
-hy_client() {
-    echo "Hysteria2 Client configuration stub."
+disable_internal_proxy() {
+    systemctl stop khalifeh-local-proxy && systemctl disable khalifeh-local-proxy
+    rm -f /etc/profile.d/khalifeh_proxy.sh /opt/khalifeh/configs/proxy_env.conf /opt/khalifeh/configs/ssh_creds.conf
+    unset http_proxy https_proxy all_proxy
+    systemctl restart khalifeh-rathole-server >/dev/null 2>&1
+    echo -e "${RED}[-] Internal Proxy Tunnel completely terminated.${NC}"
     read -p "Press Enter..."
 }
 EOF
 
 # =================================================================
-# د) ساخت خودکار هسته اسکریپت کنترل پنل (core.sh)
+# ۳. ساختار بدنه مدیریت خط فرمان (core.sh)
 # =================================================================
 cat << 'EOF' > "$BASE_DIR/core.sh"
 #!/bin/bash
 BASE="/opt/khalifeh"
 MOD="$BASE/modules"
-CFG="$BASE/configs"
 
-source "$MOD/rathole.sh" 2>/dev/null
-source "$MOD/frp.sh" 2>/dev/null
-source "$MOD/hysteria2.sh" 2>/dev/null
+[[ -f "$MOD/rathole.sh" ]] && source "$MOD/rathole.sh"
+[[ -f "$MOD/ping_fix.sh" ]] && source "$MOD/ping_fix.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -255,62 +242,52 @@ NC='\033[0m'
 
 banner() {
     clear
-    echo -e "${MAGENTA}==========================================${NC}"
-    echo -e "${CYAN}    KHALIFEH TUNNEL v2 (AUTOMATED CORE)   ${NC}"
-    echo -e "${MAGENTA}==========================================${NC}"
+    echo -e "${MAGENTA}==================================================${NC}"
+    echo -e "${CYAN}    KHALIFEH TUNNEL PRO SYSTEM (BUG-FREE MASTER)   ${NC}"
+    echo -e "${MAGENTA}==================================================${NC}"
 }
-
 main_menu() {
     while true; do
         banner
-        echo -e "1) ${CYAN}Rathole Module Terminal (Primary)${NC}"
-        echo -e "2) ${CYAN}FRP Module Terminal (Failover Route)${NC}"
-        echo -e "3) ${CYAN}Hysteria2 Module Terminal (UDP Obfuscation)${NC}"
-        echo "0) Exit Session"
-        echo "------------------------------------------"
+        echo -e "1) ${CYAN}Rathole Tunnel Core (Manage Ports)${NC}"
+        echo -e "2) ${YELLOW}Fix Connection Ping (Link Free Kharej Proxy)${NC}"
+        echo "0) Exit CLI Session"
+        echo "--------------------------------------------------"
         read -p "Select Menu Entry: " choice
         case $choice in
-            1) declare -f rathole_menu >/dev/null && rathole_menu || (echo -e "${RED}[-] Error: Function rathole_menu missing from memory.${NC}" && read -p "Press Enter...");;
-            2) declare -f frp_menu >/dev/null && frp_menu || (echo -e "${RED}[-] Error: Function frp_menu missing from memory.${NC}" && read -p "Press Enter...");;
-            3) declare -f hysteria_menu >/dev/null && hysteria_menu || (echo -e "${RED}[-] Error: Function hysteria_menu missing from memory.${NC}" && read -p "Press Enter...");;
+            1) rathole_menu ;;
+            2) proxy_menu ;;
             0) exit 0 ;;
-            *) echo "Invalid selection." && sleep 1 ;;
+            *) echo "Invalid option." && sleep 1 ;;
         esac
     done
 }
 EOF
 
 # =================================================================
-# ه) ساخت خودکار موتور پایش و تعویض مسیر خودکار (failover.sh)
+# ۴. دانلود باینری‌های پایدار و کامپایل دسترسی‌های لینوکس
 # =================================================================
-cat << 'EOF' > "$BASE_DIR/failover.sh"
-#!/bin/bash
-check_svc() {
-    systemctl is-active "$1" >/dev/null 2>&1
-    echo $?
-}
-echo "[*] Auto Failover Engine Initialized..."
-while true; do
-    R_SERVER=$(check_svc khalifeh-rathole-server)
-    R_CLIENT=$(check_svc khalifeh-rathole-client)
-    if [[ $R_SERVER -eq 0 || $R_CLIENT -eq 0 ]]; then
-        if [[ $(check_svc frps) -eq 0 || $(check_svc frpc) -eq 0 ]]; then
-            systemctl stop frps frpc >/dev/null 2>&1
-        fi
-    else
-        if [[ $(check_svc frps) -ne 0 && $(check_svc frpc) -ne 0 ]]; then
-            systemctl start frps frpc >/dev/null 2>&1
-        fi
-    fi
-    sleep 5
-done
-EOF
+ARCH=$(uname -m)
+echo "[*] Downloading stable core binaries..."
+if [[ "$ARCH" == "x86_64" ]]; then
+    R_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-gnu.zip"
+else
+    R_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-aarch64-unknown-linux-gnu.zip"
+fi
+curl -Ls "$R_URL" -o /tmp/rathole.zip && unzip -o /tmp/rathole.zip -d /tmp/ && cp /tmp/rathole "$BIN_DIR/"
 
-# =================================================================
-# و) ساخت خودکار کدهای بک‌اند پنل وب (app.py)
-# =================================================================
-cat << 'EOF' > "$WEB_DIR/app.py"
-from flask import Flask, jsonify, render_template, abort
-import subprocess
-app = Flask(__name__)
-ALLOWED_SERVICES =
+chmod +x $BIN_DIR/*
+chmod +x "$BASE_DIR"/core.sh
+chmod 755 "$MOD_DIR"/*.sh
+
+# ساخت شورت‌کات خط فرمان سیستم عامل
+cat > /usr/local/bin/khalifeh << 'LAUNCHER'
+#!/bin/bash
+source /opt/khalifeh/core.sh
+main_menu
+LAUNCHER
+chmod +x /usr/local/bin/khalifeh
+
+clear
+echo -e "\033[0;32m[+] SUCCESS: DEPLOYMENT FINISHED SUCCESSFULLY! \033[0m"
+echo -e "[*] Run terminal master menu anywhere with: \033[1;36mkhalifeh\033[0m"
