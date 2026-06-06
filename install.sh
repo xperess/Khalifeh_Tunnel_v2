@@ -1,99 +1,294 @@
 #!/bin/bash
 
-# ==========================================
-#  KHALIFEH TUNNEL v2 (PRODUCTION READY)
-# ==========================================
+# =================================================================
+#        KHALIFEH TUNNEL v2 (PREMIUM COMPLETE PRODUCTION BUILD)
+# =================================================================
 
-# بررسی دسترسی روت
 if [[ $EUID -ne 0 ]]; then
-   echo "[-] Please run this script as root (sudo)." 
+   echo "[-] This script must be run as root (sudo)." 
    exit 1
 fi
+
+echo "[*] Cleaning old workspace..."
+rm -rf /opt/khalifeh
+rm -f /usr/local/bin/khalifeh
 
 BASE_DIR="/opt/khalifeh"
 BIN_DIR="$BASE_DIR/bin"
 CFG_DIR="$BASE_DIR/configs"
+MOD_DIR="$BASE_DIR/modules"
 WEB_DIR="$BASE_DIR/web"
 
-# پاکسازی و ایجاد ساختار پوشه‌ها
-mkdir -p "$BIN_DIR" "$CFG_DIR" "$WEB_DIR/templates" "$BASE_DIR/modules"
+# ساخت پوشه‌های ساختاری
+mkdir -p "$BIN_DIR" "$CFG_DIR" "$MOD_DIR" "$WEB_DIR/templates" "/opt/khalifeh/backup"
 
-echo "[*] Updating system and installing dependencies..."
+echo "[*] Installing system package dependencies..."
 apt update -y && apt install -y curl wget jq unzip openssl python3-flask python3-pip -y
 
 ARCH=$(uname -m)
 
-# ==========================================
-# 1. بخش دانلود و نصب ابزارها
-# ==========================================
-install_binaries() {
-    # نصب Rathole
-    if [[ "$ARCH" == "x86_64" ]]; then
-        R_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-gnu.zip"
-        F_URL="https://github.com/fatedier/frp/releases/download/v0.61.2/frp_0.61.2_linux_amd64.tar.gz"
-        H_URL="https://github.com/apernet/hysteria/releases/download/v2.6.1/hysteria-linux-amd64"
-    else
-        R_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-aarch64-unknown-linux-gnu.zip"
-        F_URL="https://github.com/fatedier/frp/releases/download/v0.61.2/frp_0.61.2_linux_arm64.tar.gz"
-        H_URL="https://github.com/apernet/hysteria/releases/download/v2.6.1/hysteria-linux-arm64"
-    fi
+# -----------------------------------------------------------------
+# ۱. دانلود باینری‌های پایدار بر اساس معماری پردازنده
+# -----------------------------------------------------------------
+if [[ "$ARCH" == "x86_64" ]]; then
+    R_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-gnu.zip"
+    F_URL="https://github.com/fatedier/frp/releases/download/v0.61.2/frp_0.61.2_linux_amd64.tar.gz"
+    H_URL="https://github.com/apernet/hysteria/releases/download/v2.6.1/hysteria-linux-amd64"
+else
+    R_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-aarch64-unknown-linux-gnu.zip"
+    F_URL="https://github.com/fatedier/frp/releases/download/v0.61.2/frp_0.61.2_linux_arm64.tar.gz"
+    H_URL="https://github.com/apernet/hysteria/releases/download/v2.6.1/hysteria-linux-arm64"
+fi
 
-    echo "[*] Downloading Rathole, FRP, and Hysteria2..."
-    # Rathole
-    curl -L "$R_URL" -o /tmp/rathole.zip && unzip -o /tmp/rathole.zip -d /tmp/ && cp /tmp/rathole "$BIN_DIR/"
-    # FRP
-    curl -L "$F_URL" -o /tmp/frp.tar.gz && tar -xzf /tmp/frp.tar.gz -C /tmp/ && cp /tmp/frp*/frps /tmp/frp*/frpc "$BIN_DIR/"
-    # Hysteria2
-    curl -L "$H_URL" -o "$BIN_DIR/hysteria2"
-    
-    chmod +x $BIN_DIR/*
-    rm -rf /tmp/rathole* /tmp/frp*
-    echo "[+] All binaries installed successfully."
+echo "[*] Fetching core engine binaries..."
+curl -L "$R_URL" -o /tmp/rathole.zip && unzip -o /tmp/rathole.zip -d /tmp/ && cp /tmp/rathole "$BIN_DIR/"
+curl -L "$F_URL" -o /tmp/frp.tar.gz && tar -xzf /tmp/frp.tar.gz -C /tmp/ && cp /tmp/frp*/frps /tmp/frp*/frpc "$BIN_DIR/"
+curl -L "$H_URL" -o "$BIN_DIR/hysteria2"
+chmod +x $BIN_DIR/*
+rm -rf /tmp/rathole* /tmp/frp*
+
+# -----------------------------------------------------------------
+# ۲. ایجاد فایل ماژول مدیریت رتهول (rathole.sh) با کدهای کامل
+# -----------------------------------------------------------------
+cat > "$MOD_DIR/rathole.sh" << 'RATHOLE_EOF'
+#!/bin/bash
+rathole_menu() {
+    while true; do
+        clear
+        echo "==== RATHOLE MODULE CENTER ===="
+        echo "1) Start Server Service (Iran)"
+        echo "2) Start Client Service (Kharej)"
+        echo "3) Stop Rathole Services"
+        echo "4) Show Service Logs"
+        echo "0) Back"
+        read -p "Select: " rc
+        case $rc in
+            1) systemctl start khalifeh-rathole-server && echo "[+] Server started." && sleep 1;;
+            2) systemctl start khalifeh-rathole-client && echo "[+] Client started." && sleep 1;;
+            3) systemctl stop khalifeh-rathole-server khalifeh-rathole-client && echo "[+] Stopped." && sleep 1;;
+            4) journalctl -u khalifeh-rathole-server -u khalifeh-rathole-client -n 25 --no-pager; read -p "Press Enter...";;
+            0) break;;
+        esac
+    done
+}
+RATHOLE_EOF
+
+# -----------------------------------------------------------------
+# ۳. ایجاد فایل ماژول مدیریت اف‌آرپی (frp.sh) با کدهای کامل
+# -----------------------------------------------------------------
+cat > "$MOD_DIR/frp.sh" << 'FRP_EOF'
+#!/bin/bash
+frp_menu() {
+    while true; do
+        clear
+        echo "==== FRP MODULE CENTER ===="
+        echo "1) Start FRPS Server (Iran)"
+        echo "2) Start FRPC Client (Kharej)"
+        echo "3) Stop FRP Services"
+        echo "4) Show Service Logs"
+        echo "0) Back"
+        read -p "Select: " fc
+        case $fc in
+            1) systemctl start frps && echo "[+] FRPS started." && sleep 1;;
+            2) systemctl start frpc && echo "[+] FRPC started." && sleep 1;;
+            3) systemctl stop frps frpc && echo "[+] FRP stopped." && sleep 1;;
+            4) journalctl -u frps -u frpc -n 25 --no-pager; read -p "Press Enter...";;
+            0) break;;
+        esac
+    done
+}
+FRP_EOF
+
+# -----------------------------------------------------------------
+# ۴. ایجاد فایل ماژول مدیریت هیستریا (hysteria2.sh) با کدهای کامل
+# -----------------------------------------------------------------
+cat > "$MOD_DIR/hysteria2.sh" << 'HY_EOF'
+#!/bin/bash
+hysteria_menu() {
+    while true; do
+        clear
+        echo "==== HYSTERIA2 MODULE CENTER ===="
+        echo "1) Start Hysteria2 Server"
+        echo "2) Start Hysteria2 Client"
+        echo "3) Stop Hysteria2 Services"
+        echo "4) Show Service Logs"
+        echo "0) Back"
+        read -p "Select: " hc
+        case $hc in
+            1) systemctl start hysteria2 && echo "[+] Hysteria2 Server started." && sleep 1;;
+            2) systemctl start hysteria2-client && echo "[+] Hysteria2 Client started." && sleep 1;;
+            3) systemctl stop hysteria2 hysteria2-client && echo "[+] Hysteria2 stopped." && sleep 1;;
+            4) journalctl -u hysteria2 -u hysteria2-client -n 25 --no-pager; read -p "Press Enter...";;
+            0) break;;
+        esac
+    done
+}
+HY_EOF
+
+# -----------------------------------------------------------------
+# ۵. ایجاد هسته و منوی CLI اصلی (core.sh)
+# -----------------------------------------------------------------
+cat > "$BASE_DIR/core.sh" << 'CORE_EOF'
+#!/bin/bash
+BASE="/opt/khalifeh"
+MOD="$BASE/modules"
+CFG="$BASE/configs"
+
+[[ -f "$MOD/rathole.sh" ]] && source "$MOD/rathole.sh"
+[[ -f "$MOD/frp.sh" ]] && source "$MOD/frp.sh"
+[[ -f "$MOD/hysteria2.sh" ]] && source "$MOD/hysteria2.sh"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+MAGENTA='\033[0;35m'
+NC='\033[0m'
+
+banner() {
+    clear
+    echo -e "${MAGENTA}==========================================${NC}"
+    echo -e "${CYAN}   KHALIFEH TUNNEL v2 (STABLE ENTERPRISE)${NC}"
+    echo -e "${MAGENTA}==========================================${NC}"
 }
 
-# ==========================================
-# 2. تولید اسکریپت لایه مانیتورینگ و Failover خودکار
-# ==========================================
-create_failover_engine() {
-cat > "$BASE_DIR/failover.sh" << 'EOF'
+status_all() {
+    banner
+    echo -e "${YELLOW}[*] Overall Infrastructure Status:${NC}\n"
+    for svc in khalifeh-rathole-server khalifeh-rathole-client frps frpc hysteria2 hysteria2-client khalifeh-web khalifeh-failover; do
+        if systemctl list-units --full -all 2>/dev/null | grep -q "$svc"; then
+            STATUS=$(systemctl is-active "$svc" 2>/dev/null)
+            if [[ "$STATUS" == "active" ]]; then
+                echo -e " ● $svc : ${GREEN}RUNNING (ONLINE)${NC}"
+            else
+                echo -e " ● $svc : ${RED}STOPPED (OFFLINE)${NC}"
+            fi
+        else
+            echo -e " ● $svc : ${YELLOW}NOT INSTALLED / DEPLOYED${NC}"
+        fi
+    done
+    echo ""
+    read -p "Press Enter to return..."
+}
+
+optimize_network() {
+    echo "[*] Fine-tuning Linux Network Kernel for Tunnels..."
+    cat >> /etc/sysctl.conf << SYSCTL_EOF
+# KHALIFEH OPTIMIZATION TUNING
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_fin_timeout = 30
+net.ipv4.tcp_tw_reuse = 1
+SYSCTL_EOF
+    sysctl -p >/dev/null 2>&1
+    echo "[+] Network Kernel Optimization complete."
+    read -p "Press Enter..."
+}
+
+backup() {
+    TS=$(date +%Y%m%d_%H%M%S)
+    BK="/opt/khalifeh/backup/backup_$TS.tar.gz"
+    tar --exclude='/opt/khalifeh/backup' -czf "$BK" /opt/khalifeh
+    echo "[+] Sealed backup file created at: $BK"
+    read -p "Press Enter..."
+}
+
+restore() {
+    ls /opt/khalifeh/backup/backup_*.tar.gz 2>/dev/null
+    echo "Paste the full path of the targeted backup archive:"
+    read FILE
+    if [[ -f "$FILE" ]]; then
+        tar -xzf "$FILE" -C /
+        echo "[+] Restore successful. Refreshing runtime components..."
+        systemctl daemon-reload
+    else
+        echo "[-] Selected path reference is invalid."
+    fi
+    read -p "Press Enter..."
+}
+
+main_menu() {
+    while true; do
+        banner
+        echo "1) Rathole Tunnel Manager"
+        echo "2) FRP Tunnel Manager (v0.61+ TOML Structure)"
+        echo "3) Hysteria2 Module Manager"
+        echo "4) Real-time Nodes Status Overview"
+        echo "5) Run Network Speed/Buffer BBR Optimizations"
+        echo "6) Take Workspace Configuration Backup"
+        echo "7) Restore Configuration Archive"
+        echo "0) Safe Termination (Exit)"
+        echo "------------------------------------------"
+        read -p "Action Menu Target: " choice
+        case $choice in
+            1) declare -f rathole_menu >/dev/null && rathole_menu || (echo "Rathole sub-module linkage error" && sleep 2);;
+            2) declare -f frp_menu >/dev/null && frp_menu || (echo "FRP sub-module linkage error" && sleep 2);;
+            3) declare -f hysteria_menu >/dev/null && hysteria_menu || (echo "Hysteria2 sub-module linkage error" && sleep 2);;
+            4) status_all;;
+            5) optimize_network;;
+            6) backup;;
+            7) restore;;
+            0) exit 0;;
+            *) echo "Option outside range limits." && sleep 1;;
+        esac
+    done
+}
+CORE_EOF
+
+# -----------------------------------------------------------------
+# ۶. ایجاد موتور خودکار فیل‌اور و مانیتورینگ متقابل (failover.sh)
+# -----------------------------------------------------------------
+cat > "$BASE_DIR/failover.sh" << 'FAIL_EOF'
 #!/bin/bash
 check_svc() { systemctl is-active "$1" >/dev/null 2>&1; echo $?; }
 
-echo "[*] Starting Auto Failover Engine..."
+echo "[*] Auto Failover Monitoring Agent Initialized..."
 while true; do
-    # بررسی وضعیت روت اصلی (Rathole)
     R_SERVER=$(check_svc khalifeh-rathole-server)
     R_CLIENT=$(check_svc khalifeh-rathole-client)
     
+    # مکانیزم هوشمند: اگر اولویت اصلی (Rathole) سالم و آنلاین است
     if [[ $R_SERVER -eq 0 || $R_CLIENT -eq 0 ]]; then
-        # اگر مسیر اصلی وصل است، مسیرهای فرعی را خاموش کن تا پهنای باند هدر نرود
+        # تمام لایه‌های پشتیبان (FRP و Hysteria) را قطع کن تا آی‌پی‌ها لو نروند و منابع مصرف نشوند
         systemctl stop frps frpc hysteria2 hysteria2-client >/dev/null 2>&1
-        sleep 10
+        sleep 8
         continue
     fi
     
-    # اگر مسیر اصلی قطع شد، سوئیچ به FRP
-    if [[ $(systemctl list-units --full -all | grep -q "frp") ]]; then
-        if [[ $(check_svc frps) -ne 0 && $(check_svc frpc) -ne 0 ]]; then
-            echo "[!] Rathole DOWN. Activating FRP Backup..."
-            systemctl start frps frpc >/dev/null 2>&1
+    # در صورت قطع شدن رتهول، فورا به سراغ لایه پشتیبان اول (FRP) برو
+    echo "[!] Primary Tunnel (Rathole) is offline! Escalating to Fallback Level 1 (FRP)..."
+    if systemctl list-unit-files | grep -q "frps.service"; then
+        [[ $(check_svc frps) -ne 0 ]] && systemctl start frps
+    fi
+    if systemctl list-unit-files | grep -q "frpc.service"; then
+        [[ $(check_svc frpc) -ne 0 ]] && systemctl start frpc
+    fi
+    
+    sleep 6
+    
+    # اگر لایه دوم (FRP) هم در دسترس نباشد، سیستم را به دژ پایانی (Hysteria2) منتقل کن
+    if [[ $(check_svc frps) -ne 0 && $(check_svc frpc) -ne 0 ]]; then
+        echo "[!!] Fallback 1 Failed! Activating Last Resort Layer (Hysteria2)..."
+        if systemctl list-unit-files | grep -q "hysteria2.service"; then
+            [[ $(check_svc hysteria2) -ne 0 ]] && systemctl start hysteria2
+        fi
+        if systemctl list-unit-files | grep -q "hysteria2-client.service"; then
+            [[ $(check_svc hysteria2-client) -ne 0 ]] && systemctl start hysteria2-client
         fi
     fi
-    sleep 5
+    sleep 12
 done
-EOF
-chmod +x "$BASE_DIR/failover.sh"
-}
+FAIL_EOF
 
-# ==========================================
-# 3. توسعه پنل وب ایمن (Flask)
-# ==========================================
-create_web_panel() {
-# ایجاد فایل پایتون بک‌اند به صورت ایمن
-cat > "$WEB_DIR/app.py" << 'EOF'
+# -----------------------------------------------------------------
+# ۷. ایجاد بک‌اند پنل وب ایمن پایتون (app.py) بدون باگ Injection
+# -----------------------------------------------------------------
+cat > "$WEB_DIR/app.py" << 'APP_EOF'
 from flask import Flask, jsonify, render_template, abort
 import subprocess
-import re
 
 app = Flask(__name__)
 ALLOWED_SERVICES = ["khalifeh-rathole-server", "khalifeh-rathole-client", "frps", "frpc", "hysteria2", "hysteria2-client"]
@@ -102,7 +297,7 @@ def get_status(name):
     try:
         output = subprocess.check_output(["systemctl", "is-active", name], stderr=subprocess.STDOUT).decode().strip()
         return output
-    except:
+    except Exception:
         return "inactive"
 
 @app.route("/")
@@ -115,9 +310,7 @@ def status():
 @app.route("/api/<action>/<name>")
 def manage_service(action, name):
     if name not in ALLOWED_SERVICES or action not in ["start", "stop", "restart"]:
-        abort(400, "Invalid Action or Service Name")
-    
-    # اجرای کاملا ایمن بدون آسیب‌پذیری Command Injection
+        abort(400, "Operation not allowed due to system policy restrictions.")
     try:
         subprocess.run(["systemctl", action, name], check=True)
         return jsonify({"status": f"{action}ed", "service": name})
@@ -126,138 +319,146 @@ def manage_service(action, name):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
-EOF
+APP_EOF
 
-# فرانت‌اند پنل مدیریت
-cat > "$WEB_DIR/templates/index.html" << 'EOF'
+# -----------------------------------------------------------------
+# ۸. ایجاد فرانت‌اند وب داشبورد (index.html)
+# -----------------------------------------------------------------
+cat > "$WEB_DIR/templates/index.html" << 'HTML_EOF'
 <!DOCTYPE html>
 <html>
 <head>
     <title>Khalifeh Tunnel Panel</title>
     <style>
-        body { background:#111; color:#0f0; font-family:monospace; padding:20px; }
-        .box { padding:15px; border:1px solid #0f0; margin:10px 0; background:#1a1a1a; }
-        button { background:#222; color:#0f0; border:1px solid #0f0; padding:5px 10px; cursor:pointer; margin-right:5px;}
-        button:hover { background:#0f0; color:#111; }
-        .active { color: #00ff00; font-weight: bold; }
-        .inactive { color: #ff0000; font-weight: bold; }
+        body { background:#0d0d0d; color:#00ff33; font-family:monospace; padding:30px; }
+        .box { padding:18px; border:1px solid #00ff33; margin:12px 0; background:#141414; border-radius:4px; }
+        button { background:#222; color:#00ff33; border:1px solid #00ff33; padding:6px 14px; cursor:pointer; margin-right:6px; font-family:monospace; font-weight:bold;}
+        button:hover { background:#00ff33; color:#111; }
+        .active { color: #00ff00; font-weight: bold; text-shadow: 0 0 5px #00ff00; }
+        .inactive { color: #ff0000; font-weight: bold; text-shadow: 0 0 5px #ff0000; }
     </style>
 </head>
 <body>
-<h2>🔥 Khalifeh Tunnel Control Panel</h2>
-<div id="status">Loading services status...</div>
+<h2>🔥 Khalifeh Tunnel Secure Infrastructure Panel</h2>
+<div id="status">Syncing metrics with local nodes...</div>
 <script>
 async function loadStatus() {
-    let res = await fetch('/api/status');
-    let data = await res.json();
-    let html = "";
-    for (let k in data) {
-        let statusClass = data[k] === "active" ? "active" : "inactive";
-        html += `
-        <div class="box">
-            <b>${k}</b> : <span class="${statusClass}">${data[k]}</span>
-            <br><br>
-            <button onclick="control('${k}', 'start')">Start</button>
-            <button onclick="control('${k}', 'stop')">Stop</button>
-            <button onclick="control('${k}', 'restart')">Restart</button>
-        </div>`;
+    try {
+        let res = await fetch('/api/status');
+        let data = await res.json();
+        let html = "";
+        for (let k in data) {
+            let statusClass = data[k] === "active" ? "active" : "inactive";
+            html += `
+            <div class="box">
+                <b>[Component Node]</b> ${k} : <span class="${statusClass}">${data[k].toUpperCase()}</span>
+                <br><br>
+                <button onclick="control('${k}', 'start')">START</button>
+                <button onclick="control('${k}', 'stop')">STOP</button>
+                <button onclick="control('${k}', 'restart')">RESTART</button>
+            </div>`;
+        }
+        document.getElementById("status").innerHTML = html;
+    } catch (e) {
+        document.getElementById("status").innerHTML = "<span class='inactive'>Failed to sync web panel state.</span>";
     }
-    document.getElementById("status").innerHTML = html;
 }
 async function control(name, action) {
     await fetch(`/api/${action}/${name}`);
     loadStatus();
 }
-setInterval(loadStatus, 3000);
+setInterval(loadStatus, 4000);
 loadStatus();
 </script>
 </body>
 </html>
-EOF
-}
+HTML_EOF
 
-# ==========================================
-# 4. ساخت سرویس‌های Systemd
-# ==========================================
-create_systemd_services() {
-    # سرویس پنل وب
-    cat > /etc/systemd/system/khalifeh-web.service << EOF
+# اجرایی کردن و دسترسی‌دهی اصولی به فایل‌های سیستم
+chmod +x $BASE_DIR/*.sh
+chmod +x $MOD_DIR/*.sh
+
+# ایجاد لانچر خط فرمان گلوبال برای ترمینال (دستور khalifeh)
+cat > /usr/local/bin/khalifeh << 'LAUNCHER_EOF'
+#!/bin/bash
+source /opt/khalifeh/core.sh
+main_menu
+LAUNCHER_EOF
+chmod +x /usr/local/bin/khalifeh
+
+# -----------------------------------------------------------------
+# ۹. ساخت و استارت اسکریپت‌های Systemd لینوکس
+# -----------------------------------------------------------------
+cat > /etc/systemd/system/khalifeh-web.service << EOF
 [Unit]
-Description=Khalifeh Web Dashboard
+Description=Khalifeh Web Dashboard Daemon Ingress
 After=network.target
 [Service]
 WorkingDirectory=$WEB_DIR
 ExecStart=/usr/bin/python3 app.py
 Restart=always
-RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # سرویس فیل‌اور خودکار
-    cat > /etc/systemd/system/khalifeh-failover.service << EOF
+cat > /etc/systemd/system/khalifeh-failover.service << EOF
 [Unit]
-Description=Khalifeh Failover Engine
+Description=Khalifeh Intelligent Failover Engine Core
 After=network.target
 [Service]
 ExecStart=/bin/bash $BASE_DIR/failover.sh
 Restart=always
-RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
-    systemctl enable khalifeh-web.service khalifeh-failover.service
-    systemctl start khalifeh-web.service khalifeh-failover.service
-}
+systemctl daemon-reload
+systemctl enable khalifeh-web.service khalifeh-failover.service
+systemctl start khalifeh-web.service khalifeh-failover.service
 
-# ==========================================
-# 5. پیکربندی هوشمند نقش سرور (ایران / خارج)
-# ==========================================
-configure_role() {
-    echo "------------------------------------------"
-    echo "Select the role of this server:"
-    echo "1) IRAN (Server / Destination)"
-    echo "2) KHAREJ (Client / Origin)"
-    read -p "Choice [1-2]: " ROLE
-    
-    if [[ "$ROLE" == "1" ]]; then
-        # کانفیگ ایران (Rathole Server & FRPS)
-        read -p "Enter Tunnel Port [default 2333]: " TPORT
-        TPORT=${TPORT:-2333}
-        read -p "Enter Service Ports to open in Iran (comma-separated, e.g 443,80): " PORTS
-        
-        TOKEN=$(openssl rand -hex 16)
-        
-        # Rathole Server Config
-        cat > "$CFG_DIR/rathole-server.toml" << EOF
+# -----------------------------------------------------------------
+# ۱۰. بخش اختصاصی تفکیک و پیکربندی شبکه (ایران / خارج)
+# -----------------------------------------------------------------
+echo "------------------------------------------------------"
+echo "Select deployment role architecture for this machine:"
+echo "1) IRAN Node (Server Endpoint Ingress)"
+echo "2) KHAREJ Node (Client Tunnel Egress Destination)"
+read -p "Role Assignment Selection [1-2]: " DeploymentRole
+
+TOKEN=$(openssl rand -hex 16)
+
+if [[ "$DeploymentRole" == "1" ]]; then
+    # فرآیند راه‌اندازی سرور ایران
+    read -p "Primary Tunnel Ingress Port [default 2333]: " TPORT
+    TPORT=${TPORT:-2333}
+    read -p "Target applications ports to bridge (space separated, e.g., 443 80 8080): " PORTS
+
+    # پیاده‌سازی فرمت کانفیگ مدرن و جدید برای FRPS نسخه 0.61.2
+    cat > "$CFG_DIR/frps.toml" << EOF
+bindPort = $((TPORT+1))
+auth.method = "token"
+auth.token = "$TOKEN"
+EOF
+
+    # کانفیگ سرور لایه رتهول
+    cat > "$CFG_DIR/rathole-server.toml" << EOF
 [server]
 bind_addr = "0.0.0.0:$TPORT"
 default_token = "$TOKEN"
 [server.transport]
 type = "tcp"
 EOF
-        IFS=',' read -ra ADDR <<< "$PORTS"
-        for p in "${ADDR[@]}"; do
-            p=$(echo $p | xargs)
-            cat >> "$CFG_DIR/rathole-server.toml" << EOF
+    for p in $PORTS; do
+        cat >> "$CFG_DIR/rathole-server.toml" << EOF
 [server.services.port$p]
 bind_addr = "0.0.0.0:$p"
 EOF
-        done
+    done
 
-        # FRPS Config (نسخه جدید سازگار با v0.61.2)
-        cat > "$CFG_DIR/frps.toml" << EOF
-bindPort = $((TPORT+1))
-auth.method = "token"
-auth.token = "$TOKEN"
-EOF
-
-        # ایجاد سرویس‌های لایه ایران
-        cat > /etc/systemd/system/khalifeh-rathole-server.service << EOF
+    # ایجاد سرویس‌های ایران نود
+    cat > /etc/systemd/system/khalifeh-rathole-server.service << EOF
 [Unit]
-Description=Rathole Server
+Description=Rathole Server Component
 After=network.target
 [Service]
 ExecStart=$BIN_DIR/rathole $CFG_DIR/rathole-server.toml
@@ -266,9 +467,9 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-        cat > /etc/systemd/system/frps.service << EOF
+    cat > /etc/systemd/system/frps.service << EOF
 [Unit]
-Description=FRP Server
+Description=FRP Modern Server Engine
 After=network.target
 [Service]
 ExecStart=$BIN_DIR/frps -c $CFG_DIR/frps.toml
@@ -277,64 +478,63 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-        systemctl daemon-reload
-        systemctl enable khalifeh-rathole-server frps
-        systemctl start khalifeh-rathole-server
-        
-        echo "=================================================="
-        echo "[+] IRAN Server configured successfully!"
-        echo "[!] Rathole Port: $TPORT | FRP Port: $((TPORT+1))"
-        echo "[!] YOUR TOKEN: $TOKEN"
-        echo "=================================================="
+    systemctl daemon-reload
+    systemctl enable khalifeh-rathole-server frps
+    systemctl start khalifeh-rathole-server
+    
+    clear
+    echo "=========================================================="
+    echo -e "\033[0;32m[+] IRAN TUNNEL INSTANCE READY\033[0m"
+    echo "Rathole Core Ingress Port: $TPORT"
+    echo "FRP Core Ingress Port:    $((TPORT+1))"
+    echo "Generated Security Token: $TOKEN"
+    echo "=========================================================="
 
-    elif [[ "$ROLE" == "2" ]]; then
-        # کانفیگ خارج (Rathole Client & FRPC)
-        read -p "Enter IRAN Server IP: " IRAN_IP
-        read -p "Enter Iran Tunnel Port [default 2333]: " TPORT
-        TPORT=${TPORT:-2333}
-        read -p "Enter Token from Iran server: " TOKEN
-        read -p "Enter local ports to forward (comma-separated, e.g 443,80): " PORTS
-        
-        # Rathole Client Config
-        cat > "$CFG_DIR/rathole-client.toml" << EOF
+else
+    # فرآیند راه‌اندازی سرور خارج
+    read -p "Enter Target Remote IRAN IP: " IRAN_IP
+    read -p "Enter Iran Ingress Port [default 2333]: " TPORT
+    TPORT=${TPORT:-2333}
+    read -p "Enter Security Token copied from Iran Server: " TOKEN
+    read -p "Local ports to route and map (space separated, e.g., 443 80 8080): " PORTS
+
+    # کانفیگ کلاینت لایه رتهول
+    cat > "$CFG_DIR/rathole-client.toml" << EOF
 [client]
 remote_addr = "$IRAN_IP:$TPORT"
 default_token = "$TOKEN"
 [client.transport]
 type = "tcp"
 EOF
-        IFS=',' read -ra ADDR <<< "$PORTS"
-        for p in "${ADDR[@]}"; do
-            p=$(echo $p | xargs)
-            cat >> "$CFG_DIR/rathole-client.toml" << EOF
+    for p in $PORTS; do
+        cat >> "$CFG_DIR/rathole-client.toml" << EOF
 [client.services.port$p]
 local_addr = "127.0.0.1:$p"
 EOF
-        done
+    done
 
-        # FRPC Config (نسخه جدید سازگار با v0.61.2)
-        cat > "$CFG_DIR/frpc.toml" << EOF
+    # پیاده‌سازی فرمت کانفیگ مدرن و جدید برای FRPC کلاینت نسخه 0.61.2
+    cat > "$CFG_DIR/frpc.toml" << EOF
 serverAddr = "$IRAN_IP"
 serverPort = $((TPORT+1))
 auth.method = "token"
 auth.token = "$TOKEN"
 EOF
-        for p in "${ADDR[@]}"; do
-            p=$(echo $p | xargs)
-            cat >> "$CFG_DIR/frpc.toml" << EOF
+    for p in $PORTS; do
+        cat >> "$CFG_DIR/frpc.toml" << EOF
 [[proxies]]
-name = "proxy-$p"
+name = "tunnel-proxy-port-$p"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = $p
 remotePort = $p
 EOF
-        done
+    done
 
-        # ایجاد سرویس‌های لایه خارج
-        cat > /etc/systemd/system/khalifeh-rathole-client.service << EOF
+    # ایجاد سرویس‌های خارج نود
+    cat > /etc/systemd/system/khalifeh-rathole-client.service << EOF
 [Unit]
-Description=Rathole Client
+Description=Rathole Client Tunnel Endpoint
 After=network.target
 [Service]
 ExecStart=$BIN_DIR/rathole $CFG_DIR/rathole-client.toml
@@ -343,9 +543,9 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-        cat > /etc/systemd/system/frpc.service << EOF
+    cat > /etc/systemd/system/frpc.service << EOF
 [Unit]
-Description=FRP Client
+Description=FRP Client Node Infrastructure
 After=network.target
 [Service]
 ExecStart=$BIN_DIR/frpc -c $CFG_DIR/frpc.toml
@@ -354,24 +554,15 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-        systemctl daemon-reload
-        systemctl enable khalifeh-rathole-client frpc
-        systemctl start khalifeh-rathole-client
+    systemctl daemon-reload
+    systemctl enable khalifeh-rathole-client frpc
+    systemctl start khalifeh-rathole-client
+    
+    clear
+    echo "=========================================================="
+    echo -e "\033[0;32m[+] KHAREJ TUNNEL INSTANCE CONNECTED\033[0m"
+    echo "=========================================================="
+fi
 
-        echo "=================================================="
-        echo "[+] KHAREJ Client configured and started!"
-        echo "=================================================="
-    else
-        echo "Invalid Selection."
-        exit 1
-    fi
-}
-
-# اجرای کل پروسه نصب
-install_binaries
-create_failover_engine
-create_web_panel
-create_systemd_services
-configure_role
-
-echo "[*] Web Panel Link: http://YOUR_SERVER_IP:8080"
+echo "[*] Web Dashboard Link: http://YOUR_SERVER_IP:8080"
+echo "[*] Type 'khalifeh' anywhere in your terminal to start management panel."
