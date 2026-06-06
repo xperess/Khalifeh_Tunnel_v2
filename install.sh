@@ -1,6 +1,6 @@
 #!/bin/bash
 # =================================================================
-#  KHALIFEH TUNNEL PRO - AUTO MASTER INSTALLER (BUG-FREE RESILIENT)
+#  KHALIFEH TUNNEL v2 - FIXED PROXY ENGINE & MENU SYSTEM (FINAL)
 # =================================================================
 
 if [[ $EUID -ne 0 ]]; then
@@ -14,18 +14,18 @@ CFG_DIR="$BASE_DIR/configs"
 MOD_DIR="$BASE_DIR/modules"
 WEB_DIR="$BASE_DIR/web"
 
-# پاک‌سازی کامل سرویس‌های قبلی جهت جلوگیری از تداخل شل‌ها و پورت‌ها
+# پاک‌سازی کامل سرویس‌های قدیمی جهت جلوگیری از تداخل پورت‌ها
 systemctl stop khalifeh-web khalifeh-failover khalifeh-rathole-server khalifeh-rathole-client khalifeh-local-proxy >/dev/null 2>&1
 rm -rf "$BASE_DIR"
 rm -f /usr/local/bin/khalifeh
 
 mkdir -p "$BIN_DIR" "$CFG_DIR" "$MOD_DIR" "$WEB_DIR/templates"
 
-echo "[*] Upgrading OS core dependencies..."
+echo "[*] Upgrading system core and installing network packages..."
 apt update -y && apt install -y curl wget jq unzip openssl python3-flask python3-pip net-tools sshpass -y
 
 # =================================================================
-# ۱. ماژول پایدار رتهول (rathole.sh)
+# ۱. ماژول رتهول ارتقا یافته (rathole.sh)
 # =================================================================
 cat << 'EOF' > "$MOD_DIR/rathole.sh"
 #!/bin/bash
@@ -49,7 +49,7 @@ rathole_menu() {
 rathole_iran() {
     read -p "Enter Tunnel Bind Port [Default: 2333]: " port
     port=${port:-2333}
-    read -p "Enter X-UI Ports to tunnel (comma separated, e.g. 443,8080): " ports
+    read -p "Enter X-UI Ports to tunnel (separated by comma, e.g. 443,8080): " ports
     token=$(openssl rand -hex 16)
     cat <<EOF > /opt/khalifeh/configs/rathole-server.toml
 [server]
@@ -67,7 +67,7 @@ bind_addr = "0.0.0.0:$p"
 EOF
     done
     
-    # ساخت دیمن با قابلیت تزریق مستقیم پروکسی محلی به هسته رتهول
+    # ساخت دیمن با قابلیت خواندن مستقیم متغیرهای پروکسی محلی (حل مشکل قطعی بعد از ریستارت)
     cat <<EOF > /etc/systemd/system/khalifeh-rathole-server.service
 [Unit]
 Description=Khalifeh Rathole Server
@@ -126,11 +126,11 @@ EOF
 EOF
 
 # =================================================================
-# ۲. ماژول تصحیح پینگ با قابلیت راه‌اندازی اتوماتیک پس از ریستارت (ping_fix.sh)
+# ۲. ماژول اصلاح‌شده فیکس پینگ و ساخت پروکسی داخلی (ping_fix.sh)
 # =================================================================
 cat << 'EOF' > "$MOD_DIR/ping_fix.sh"
 #!/bin/bash
-proxy_menu() {
+proxy_fix_menu() {
     while true; do
         banner
         echo -e "${YELLOW}=== FIX PING: Self-Hosted Kharej Proxy Engine ===${NC}"
@@ -142,7 +142,7 @@ proxy_menu() {
         case $cp in
             1) deploy_internal_proxy ;;
             2) disable_internal_proxy ;;
-            3) clear; echo "[*] Testing latency via proxy corridor..."; curl -I -s --connect-timeout 4 https://www.google.com | head -n 1; read -p "Press Enter..." ;;
+            3) clear; echo "[*] Testing latency to international gateway..."; curl -I -s --connect-timeout 4 https://www.google.com | head -n 1; read -p "Press Enter..." ;;
             0) break ;;
         esac
     done
@@ -154,7 +154,7 @@ deploy_internal_proxy() {
     kharej_ssh_port=${kharej_ssh_port:-22}
     read -p "Enter KHAREJ Root Password: " kharej_pass
 
-    # ذخیره مشخصات به صورت پایدار برای بالا آمدن خودکار پس از بوت شدن سرور
+    # ذخیره مشخصات به صورت فایل ثابت برای پایداری ۱۰۰٪ پس از ریستارت سرور ایران
     cat <<EOF > /opt/khalifeh/configs/ssh_creds.conf
 KHAREJ_IP="$kharej_ip"
 KHAREJ_PORT="$kharej_ssh_port"
@@ -164,7 +164,7 @@ EOF
 
     echo -e "${YELLOW}[*] Generating highly secure SSH Tunnel Proxy on port 1080...${NC}"
     
-    # اسکریپت رانر برای بارگذاری کرنشال‌ها در محیط ایزوله دیمن لینوکس
+    # ایجاد اسکریپت رانر برای لود کردن امن اطلاعات کرنشال در دیمن سیستم
     cat << 'RUNNER' > /opt/khalifeh/bin/proxy_runner.sh
 #!/bin/bash
 source /opt/khalifeh/configs/ssh_creds.conf
@@ -172,7 +172,7 @@ exec /usr/bin/sshpass -p "$KHAREJ_PASS" ssh -o StrictHostKeyChecking=no -o UserK
 RUNNER
     chmod +x /opt/khalifeh/bin/proxy_runner.sh
 
-    # ایجاد سرویس دائمی فیکس پینگ
+    # ساخت یک سرویس سیستمی پایدار که از خود سرور خارج یک پراکسی سوکس۵ امن روی لوکال ایران می‌سازد
     cat <<EOF > /etc/systemd/system/khalifeh-local-proxy.service
 [Unit]
 Description=Khalifeh Secure Fix-Ping Proxy Forwarder
@@ -191,7 +191,7 @@ EOF
     systemctl enable --now khalifeh-local-proxy
     sleep 3
 
-    # فیکس نهایی: تزریق همزمان به کل سیستم عامل + دیمن اختصاصی رتهول
+    # تزریق همزمان به دیمن اختصاصی رتهول و پروفایل اوبونتو
     cat <<EOF > /opt/khalifeh/configs/proxy_env.conf
 http_proxy=socks5://127.0.0.1:1080
 https_proxy=socks5://127.0.0.1:1080
@@ -204,26 +204,29 @@ EOF
 export http_proxy="socks5://127.0.0.1:1080"
 export https_proxy="socks5://127.0.0.1:1080"
 export all_proxy="socks5://127.0.0.1:1080"
+export HTTP_PROXY="socks5://127.0.0.1:1080"
+export HTTPS_PROXY="socks5://127.0.0.1:1080"
 EOF
 
-    # ری‌استارت سرویس رتهول برای اعمال شناسایی مسیر جدید پروکسی
+    # ری‌استارت سرویس رتهول برای اعمال لایه امن مسیر جدید
     systemctl restart khalifeh-rathole-server >/dev/null 2>&1
 
-    echo -e "${GREEN}[+] SUCCESS: Server Iran is now permanently proxied via Kharej Node!${NC}"
+    echo -e "${GREEN}[+] SUCCESS: Server Iran is now fully proxied via Kharej Server!${NC}"
+    echo -e "${GREEN}[+] Rathole connections will now bypass Iran national filtering data blocks.${NC}"
     read -p "Press Enter to continue..."
 }
 disable_internal_proxy() {
     systemctl stop khalifeh-local-proxy && systemctl disable khalifeh-local-proxy
     rm -f /etc/profile.d/khalifeh_proxy.sh /opt/khalifeh/configs/proxy_env.conf /opt/khalifeh/configs/ssh_creds.conf
-    unset http_proxy https_proxy all_proxy
+    unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY
     systemctl restart khalifeh-rathole-server >/dev/null 2>&1
-    echo -e "${RED}[-] Internal Proxy Tunnel completely terminated.${NC}"
+    echo -e "${RED}[- ] Internal Proxy Tunnel completely terminated.${NC}"
     read -p "Press Enter..."
 }
 EOF
 
 # =================================================================
-# ۳. ساختار بدنه مدیریت خط فرمان (core.sh)
+# ۳. ساختار بدنه و منوی اصلی (core.sh) - تصحیح توابع فراخوانی منو
 # =================================================================
 cat << 'EOF' > "$BASE_DIR/core.sh"
 #!/bin/bash
@@ -243,20 +246,20 @@ NC='\033[0m'
 banner() {
     clear
     echo -e "${MAGENTA}==================================================${NC}"
-    echo -e "${CYAN}    KHALIFEH TUNNEL PRO SYSTEM (BUG-FREE MASTER)   ${NC}"
+    echo -e "${CYAN}     KHALIFEH PRO TUNNEL FRAMEWORK (FIX PING)     ${NC}"
     echo -e "${MAGENTA}==================================================${NC}"
 }
 main_menu() {
     while true; do
         banner
         echo -e "1) ${CYAN}Rathole Tunnel Core (Manage Ports)${NC}"
-        echo -e "2) ${YELLOW}Fix Connection Ping (Link Free Kharej Proxy)${NC}"
+        echo -e "2) ${YELLOW}Fix Connection Ping (Create Free Internal Proxy)${NC}"
         echo "0) Exit CLI Session"
         echo "--------------------------------------------------"
         read -p "Select Menu Entry: " choice
         case $choice in
             1) rathole_menu ;;
-            2) proxy_menu ;;
+            2) proxy_fix_menu ;;  # نام تابع دقیقاً به این خط تصحیح شد
             0) exit 0 ;;
             *) echo "Invalid option." && sleep 1 ;;
         esac
@@ -265,7 +268,7 @@ main_menu() {
 EOF
 
 # =================================================================
-# ۴. دانلود باینری‌های پایدار و کامپایل دسترسی‌های لینوکس
+# ۴. دانلود و راه‌اندازی ملزومات سیستم
 # =================================================================
 ARCH=$(uname -m)
 echo "[*] Downloading stable core binaries..."
@@ -280,7 +283,7 @@ chmod +x $BIN_DIR/*
 chmod +x "$BASE_DIR"/core.sh
 chmod 755 "$MOD_DIR"/*.sh
 
-# ساخت شورت‌کات خط فرمان سیستم عامل
+# ساخت میانبر اجرای خط فرمان
 cat > /usr/local/bin/khalifeh << 'LAUNCHER'
 #!/bin/bash
 source /opt/khalifeh/core.sh
@@ -289,5 +292,5 @@ LAUNCHER
 chmod +x /usr/local/bin/khalifeh
 
 clear
-echo -e "\033[0;32m[+] SUCCESS: DEPLOYMENT FINISHED SUCCESSFULLY! \033[0m"
-echo -e "[*] Run terminal master menu anywhere with: \033[1;36mkhalifeh\033[0m"
+echo -e "\033[0;32m[+] FULLY INSTALLED SUCCESSFULLY! \033[0m"
+echo -e "[*] Type \033[1;36mkhalifeh\033[0m anywhere to configure your multi-ports and fix ping layers."
