@@ -1,10 +1,11 @@
 #!/bin/bash
 # =================================================================
-#  KHALIFEH TUNNEL v2 - ALL-IN-ONE MASTER FIX INSTALLER
+#  KHALIFEH TUNNEL v2 - AUTOMATED GITHUB MASTER INSTALLER
 # =================================================================
 
+# ۱. بررسی دسترسی روت
 if [[ $EUID -ne 0 ]]; then
-   echo "[-] Please run this script as root (sudo)." 
+   echo -e "\033[0;31m[-] Please run this script as root (sudo).\033[0m" 
    exit 1
 fi
 
@@ -14,20 +15,25 @@ CFG_DIR="$BASE_DIR/configs"
 MOD_DIR="$BASE_DIR/modules"
 WEB_DIR="$BASE_DIR/web"
 
-echo "[*] Cleaning old framework trace..."
+# ۲. پاک‌سازی کامل آثار نصب خراب قبلی برای جلوگیری از تداخل
+echo "[*] Cleaning up any previous installation..."
 systemctl stop khalifeh-web khalifeh-failover >/dev/null 2>&1
 rm -rf "$BASE_DIR"
 rm -f /usr/local/bin/khalifeh
 
-# ایجاد پوشه‌های تمیز
+# ۳. ایجاد دایرکتوری‌های استاندارد سیستم
+echo "[*] Creating system directory architecture..."
 mkdir -p "$BIN_DIR" "$CFG_DIR" "$MOD_DIR" "$WEB_DIR/templates"
 
-echo "[*] Installing dependencies..."
+# ۴. نصب وابستگی‌های پکیج لینوکس
+echo "[*] Installing required system packages..."
 apt update -y && apt install -y curl wget jq unzip openssl python3-flask python3-pip -y
 
-echo "[*] Injecting Real Production Modules (Fixing 14-byte bug)..."
+echo "[*] Deploying system framework components..."
 
-# 1. تزریق مستقیم کد rathole.sh
+# =================================================================
+# الف) ساخت خودکار ماژول rathole.sh
+# =================================================================
 cat << 'EOF' > "$MOD_DIR/rathole.sh"
 #!/bin/bash
 rathole_menu() {
@@ -54,17 +60,17 @@ rathole_iran() {
     token=$(openssl rand -hex 16)
     cat <<EOF > /opt/khalifeh/configs/rathole-server.toml
 [server]
-bind_addr = \"0.0.0.0:$port\"
-default_token = \"$token\"
+bind_addr = "0.0.0.0:$port"
+default_token = "$token"
 [server.transport]
-type = \"tcp\"
+type = "tcp"
 EOF
     IFS=',' read -ra ADDR <<< "$ports"
     for p in "${ADDR[@]}"; do
         p=$(echo $p | xargs)
         cat <<EOF >> /opt/khalifeh/configs/rathole-server.toml
 [server.services.port_$p]
-bind_addr = \"127.0.0.1:$p\"
+bind_addr = "127.0.0.1:$p"
 EOF
     done
     cat <<EOF > /etc/systemd/system/khalifeh-rathole-server.service
@@ -91,17 +97,17 @@ rathole_kharej() {
     read -p "Enter local ports to map (comma separated, e.g. 80,443): " ports
     cat <<EOF > /opt/khalifeh/configs/rathole-client.toml
 [client]
-remote_addr = \"$ip:$port\"
-default_token = \"$token\"
+remote_addr = "$ip:$port"
+default_token = "$token"
 [client.transport]
-type = \"tcp\"
+type = "tcp"
 EOF
     IFS=',' read -ra ADDR <<< "$ports"
     for p in "${ADDR[@]}"; do
         p=$(echo $p | xargs)
         cat <<EOF >> /opt/khalifeh/configs/rathole-client.toml
 [client.services.port_$p]
-local_addr = \"127.0.0.1:$p\"
+local_addr = "127.0.0.1:$p"
 EOF
     done
     cat <<EOF > /etc/systemd/system/khalifeh-rathole-client.service
@@ -121,7 +127,9 @@ EOF
 }
 EOF
 
-# 2. تزریق مستقیم کد frp.sh
+# =================================================================
+# ب) ساخت خودکار ماژول frp.sh
+# =================================================================
 cat << 'EOF' > "$MOD_DIR/frp.sh"
 #!/bin/bash
 frp_menu() {
@@ -145,8 +153,8 @@ frp_iran() {
     read -p "Enter Token: " token
     cat <<EOF > /opt/khalifeh/configs/frps.toml
 bindPort = $port
-auth.method = \"token\"
-auth.token = \"$token\"
+auth.method = "token"
+auth.token = "$token"
 EOF
     cat <<EOF > /etc/systemd/system/frps.service
 [Unit]
@@ -158,17 +166,19 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload && systemctl enable frps
-    echo -e "${GREEN}[+] FRPS Installed (Managed via Failover Engine)${NC}"
+    systemctl daemon-reload && systemctl enable --now frps
+    echo -e "${GREEN}[+] FRPS Installed successfully.${NC}"
     read -p "Press Enter..."
 }
 frp_kharej() {
-    echo "FRP Client stub config helper active."
+    echo "FRP Client helper stub active."
     read -p "Press Enter..."
 }
 EOF
 
-# 3. تزریق مستقیم کد hysteria2.sh
+# =================================================================
+# ج) ساخت خودکار ماژول hysteria2.sh
+# =================================================================
 cat << 'EOF' > "$MOD_DIR/hysteria2.sh"
 #!/bin/bash
 hysteria_menu() {
@@ -201,7 +211,7 @@ tls:
   key: /etc/ssl/khalifeh/key.pem
 auth:
   type: password
-  password: \"$password\"
+  password: "$password"
 EOF
     cat <<EOF > /etc/systemd/system/hysteria2.service
 [Unit]
@@ -218,12 +228,14 @@ EOF
     read -p "Press Enter..."
 }
 hy_client() {
-    echo "Hysteria2 Client helper active."
+    echo "Hysteria2 Client configuration stub."
     read -p "Press Enter..."
 }
 EOF
 
-# 4. ایجاد هسته اصلی core.sh مرجع لودر توابع لینوکس
+# =================================================================
+# د) ساخت خودکار هسته اسکریپت کنترل پنل (core.sh)
+# =================================================================
 cat << 'EOF' > "$BASE_DIR/core.sh"
 #!/bin/bash
 BASE="/opt/khalifeh"
@@ -244,7 +256,7 @@ NC='\033[0m'
 banner() {
     clear
     echo -e "${MAGENTA}==========================================${NC}"
-    echo -e "${CYAN}    KHALIFEH TUNNEL v2 (PRODUCTION FIX)    ${NC}"
+    echo -e "${CYAN}    KHALIFEH TUNNEL v2 (AUTOMATED CORE)   ${NC}"
     echo -e "${MAGENTA}==========================================${NC}"
 }
 
@@ -258,47 +270,47 @@ main_menu() {
         echo "------------------------------------------"
         read -p "Select Menu Entry: " choice
         case $choice in
-            1) declare -f rathole_menu >/dev/null && rathole_menu || (echo -e "${RED}[-] Error: Function rathole_menu missing from system memory.${NC}" && read -p "Press Enter...");;
-            2) declare -f frp_menu >/dev/null && frp_menu || (echo -e "${RED}[-] Error: Function frp_menu missing from system memory.${NC}" && read -p "Press Enter...");;
-            3) declare -f hysteria_menu >/dev/null && hysteria_menu || (echo -e "${RED}[-] Error: Function hysteria_menu missing from system memory.${NC}" && read -p "Press Enter...");;
+            1) declare -f rathole_menu >/dev/null && rathole_menu || (echo -e "${RED}[-] Error: Function rathole_menu missing from memory.${NC}" && read -p "Press Enter...");;
+            2) declare -f frp_menu >/dev/null && frp_menu || (echo -e "${RED}[-] Error: Function frp_menu missing from memory.${NC}" && read -p "Press Enter...");;
+            3) declare -f hysteria_menu >/dev/null && hysteria_menu || (echo -e "${RED}[-] Error: Function hysteria_menu missing from memory.${NC}" && read -p "Press Enter...");;
             0) exit 0 ;;
-            *) echo "Invalid workspace selection." && sleep 1 ;;
+            *) echo "Invalid selection." && sleep 1 ;;
         esac
     done
 }
 EOF
 
-# دانلود خودکار باینری‌های اجرایی کلاینت‌ها/سرورها
-ARCH=$(uname -m)
-echo "[*] Downloading stable binaries for $ARCH..."
-if [[ "$ARCH" == "x86_64" ]]; then
-    R_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-gnu.zip"
-    F_URL="https://github.com/fatedier/frp/releases/download/v0.61.2/frp_0.61.2_linux_amd64.tar.gz"
-    H_URL="https://github.com/apernet/hysteria/releases/download/v2.6.1/hysteria-linux-amd64"
-else
-    R_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-aarch64-unknown-linux-gnu.zip"
-    F_URL="https://github.com/fatedier/frp/releases/download/v0.61.2/frp_0.61.2_linux_arm64.tar.gz"
-    H_URL="https://github.com/apernet/hysteria/releases/download/v2.6.1/hysteria-linux-arm64"
-fi
-
-curl -L "$R_URL" -o /tmp/rathole.zip && unzip -o /tmp/rathole.zip -d /tmp/ && cp /tmp/rathole "$BIN_DIR/"
-curl -L "$F_URL" -o /tmp/frp.tar.gz && tar -xzf /tmp/frp.tar.gz -C /tmp/ && cp /tmp/frp*/frps /tmp/frp*/frpc "$BIN_DIR/"
-curl -L "$H_URL" -o "$BIN_DIR/hysteria2"
-
-# کاملاً اجرایی کردن فایل‌ها
-chmod +x $BIN_DIR/*
-chmod +x "$BASE_DIR/core.sh"
-chmod 755 "$MOD_DIR"/*.sh
-
-# ساخت لینک اجرایی سراسری بدون تداخل توابع کش‌شده سیستم
-cat > /usr/local/bin/khalifeh << 'EOF'
+# =================================================================
+# ه) ساخت خودکار موتور پایش و تعویض مسیر خودکار (failover.sh)
+# =================================================================
+cat << 'EOF' > "$BASE_DIR/failover.sh"
 #!/bin/bash
-unset -f rathole_menu frp_menu hysteria_menu main_menu banner 2>/dev/null
-source /opt/khalifeh/core.sh
-main_menu
+check_svc() {
+    systemctl is-active "$1" >/dev/null 2>&1
+    echo $?
+}
+echo "[*] Auto Failover Engine Initialized..."
+while true; do
+    R_SERVER=$(check_svc khalifeh-rathole-server)
+    R_CLIENT=$(check_svc khalifeh-rathole-client)
+    if [[ $R_SERVER -eq 0 || $R_CLIENT -eq 0 ]]; then
+        if [[ $(check_svc frps) -eq 0 || $(check_svc frpc) -eq 0 ]]; then
+            systemctl stop frps frpc >/dev/null 2>&1
+        fi
+    else
+        if [[ $(check_svc frps) -ne 0 && $(check_svc frpc) -ne 0 ]]; then
+            systemctl start frps frpc >/dev/null 2>&1
+        fi
+    fi
+    sleep 5
+done
 EOF
-chmod +x /usr/local/bin/khalifeh
 
-clear
-echo -e "\033[0;32m[+] All 14-byte broken modules fixed and framework successfully deployed!\033[0m"
-echo -e "[*] Type \033[1;36mkhalifeh\033[0m to run your fixed control panel."
+# =================================================================
+# و) ساخت خودکار کدهای بک‌اند پنل وب (app.py)
+# =================================================================
+cat << 'EOF' > "$WEB_DIR/app.py"
+from flask import Flask, jsonify, render_template, abort
+import subprocess
+app = Flask(__name__)
+ALLOWED_SERVICES =
