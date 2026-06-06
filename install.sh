@@ -28,7 +28,6 @@ install_rathole() {
         return
     fi
     echo -e "${YELLOW}[*] Installing dependencies and Rathole core...${NC}"
-    # حذف مخازن خراب احتمالی اوبونتو ۲۴ و نصب ابزارهای شبکه
     rm -f /etc/apt/sources.list.d/cloudflare*.list >/dev/null 2>&1
     apt update -y && apt install -y curl unzip wget jq net-tools sshpass < /dev/null
     
@@ -46,20 +45,18 @@ install_rathole() {
     rm -f /tmp/rathole.zip /tmp/rathole
 }
 
-# ۲. پیکربندی سرور ایران + ایجاد دلان پروکسی از سرور خارج
+# ۲. پیکربندی سرور ایران + ایجاد دالان پروکسی از سرور خارج
 setup_iran() {
     install_rathole
     clear
     echo -e "${CYAN}=== CONFIGURING IRAN SERVER (SERVER MODE + FIX PING) ===${NC}"
     
-    # الف) بخش راه‌اندازی پروکسی برای فیکس کردن پینگ سرور ایران از اینترنت سرور خارج
     echo -e "${YELLOW}[*] To bypass filtering and fix ping, enter your KHAREJ server details:${NC}"
     read -p "Enter KHAREJ Server IP: " kharej_ip
     read -p "Enter KHAREJ SSH Port [Default: 22]: " kharej_ssh_port
     kharej_ssh_port=${kharej_ssh_port:-22}
     read -p "Enter KHAREJ Root Password: " kharej_pass
 
-    # ذخیره اطلاعات ورود به خارج برای پایداری ۱۰۰٪ پس از ریستارت سرور ایران
     cat <<EOT > "$CFG_DIR/ssh_creds.conf"
 KHAREJ_IP="$kharej_ip"
 KHAREJ_PORT="$kharej_ssh_port"
@@ -67,7 +64,6 @@ KHAREJ_PASS="$kharej_pass"
 EOT
     chmod 600 "$CFG_DIR/ssh_creds.conf"
 
-    # ساخت رانر ایزوله برای ایجاد تونل سوکس۵ (مستقر روی پورت ۱۰۸۰ سرور ایران)
     cat << 'RUNNER' > "$BIN_DIR/proxy_runner.sh"
 #!/bin/bash
 source /opt/khalifeh_tunnel/configs/ssh_creds.conf
@@ -75,7 +71,6 @@ exec /usr/bin/sshpass -p "$KHAREJ_PASS" ssh -o StrictHostKeyChecking=no -o UserK
 RUNNER
     chmod +x "$BIN_DIR/proxy_runner.sh"
 
-    # ساخت سرویس سیستمی برای پروکسی معکوس سرور خارج
     cat <<EOT > /etc/systemd/system/khalifeh-proxy.service
 [Unit]
 Description=Khalifeh Fix-Ping Proxy Corridor
@@ -94,7 +89,6 @@ EOT
     systemctl enable --now khalifeh-proxy.service
     sleep 2
 
-    # ایجاد فایل محیطی پروکسی برای اینکه رتهول ایران اجباراً از داخل این دالان عبور کند
     cat <<EOT > "$CFG_DIR/proxy_env.conf"
 http_proxy=socks5://127.0.0.1:1080
 https_proxy=socks5://127.0.0.1:1080
@@ -103,7 +97,6 @@ HTTP_PROXY=socks5://127.0.0.1:1080
 HTTPS_PROXY=socks5://127.0.0.1:1080
 EOT
 
-    # ب) بخش تنظیمات اصلی رتهول سرور (ایران)
     echo -e "\n${CYAN}--------------------------------------------------------${NC}"
     read -p "Enter a Port for Tunnel Connection [Default: 2333]: " bind_port
     bind_port=${bind_port:-2333}
@@ -132,7 +125,6 @@ bind_addr = "0.0.0.0:$p"
 EOT
     done
 
-    # ساخت سرویس سیستمی رتهول ایران (متصل به سرویس پروکسی خارج)
     cat <<EOT > /etc/systemd/system/khalifeh-tunnel.service
 [Unit]
 Description=Khalifeh Rathole Tunnel Server (IRAN)
@@ -162,7 +154,7 @@ EOT
     read -p "Copy these details safe, then press Enter to return to menu..."
 }
 
-# ۳. پیکربندی سرور خارج (نیاز به پروکسی ندارد، فقط رتهول کلاینت)
+# ۳. پیکربندی سرور خارج
 setup_kharej() {
     install_rathole
     clear
@@ -216,7 +208,6 @@ EOT
     read -p "Press Enter to return..."
 }
 
-# منوی اصلی اسکریپت
 while true; do
     clear
     echo -e "${CYAN}==================================================${NC}"
