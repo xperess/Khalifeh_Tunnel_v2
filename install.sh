@@ -1,196 +1,88 @@
 #!/bin/bash
 # =================================================================
-#  KHALIFEH TUNNEL v2 - SYSTEMD & SYNTAX FIXED MASTER INSTALLER
+#  KHALIFEH RATHOLE TUNNEL FOR X-UI (IRAN <-> KHAREJ WITH FIX PING)
 # =================================================================
 
+# بررسی دسترسی روت
 if [[ $EUID -ne 0 ]]; then
    echo -e "\033[0;31m[-] Please run this script as root (sudo).\033[0m" 
    exit 1
 fi
 
-BASE_DIR="/opt/khalifeh"
+BASE_DIR="/opt/khalifeh_tunnel"
 BIN_DIR="$BASE_DIR/bin"
 CFG_DIR="$BASE_DIR/configs"
-MOD_DIR="$BASE_DIR/modules"
-WEB_DIR="$BASE_DIR/web"
 
-# فیکس کردن مخزن خراب سیستم شما جهت جلوگیری از توقف آپدیت apt
-rm -f /etc/apt/sources.list.d/cloudflare*.list /etc/apt/sources.list.d/cloudflared*.list
+mkdir -p "$BIN_DIR" "$CFG_DIR"
 
-# پاک‌سازی لایه‌های قدیمی برای جلوگیری از تداخل پورت‌ها
-systemctl stop khalifeh-web khalifeh-failover khalifeh-rathole-server khalifeh-rathole-client khalifeh-local-proxy >/dev/null 2>&1
-rm -rf "$BASE_DIR"
-rm -f /usr/local/bin/khalifeh
+# رنگ‌ها برای زیبایی منو
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+NC='\033[0m'
 
-mkdir -p "$BIN_DIR" "$CFG_DIR" "$MOD_DIR" "$WEB_DIR/templates"
-
-echo "[*] Cleaning APT mirrors and upgrading core system packages..."
-apt-get update -y && apt-get install -y curl wget jq unzip openssl python3-flask python3-pip net-tools sshpass -y
-
-# =================================================================
-# ۱. ماژول پایدار رتهول (rathole.sh)
-# =================================================================
-cat << 'EOF' > "$MOD_DIR/rathole.sh"
-#!/bin/bash
-rathole_menu() {
-    while true; do
-        banner
-        echo -e "${CYAN}=== Rathole Tunnel Manager ===${NC}"
-        echo "1) Configure IRAN Server (Server Mode)"
-        echo "2) Configure KHAREJ Server (Client Mode)"
-        echo "3) Live Connection Logs"
-        echo "0) Back"
-        read -p "Selection: " c
-        case $c in
-            1) rathole_iran ;;
-            2) rathole_kharej ;;
-            3) journalctl -u khalifeh-rathole-server -u khalifeh-rathole-client -n 30 --no-pager; read -p "Press Enter..." ;;
-            0) break ;;
-        esac
-    done
-}
-rathole_iran() {
-    read -p "Enter Tunnel Bind Port [Default: 2333]: " port
-    port=${port:-2333}
-    read -p "Enter X-UI Ports to tunnel (separated by comma, e.g. 443,8080): " ports
-    token=$(openssl rand -hex 16)
+# ۱. دانلود باینری رتهول متناسب با معماری سرور
+install_rathole() {
+    if [ -f "$BIN_DIR/rathole" ]; then
+        return
+    fi
+    echo -e "${YELLOW}[*] Installing dependencies and Rathole core...${NC}"
+    # حذف مخازن خراب احتمالی اوبونتو ۲۴ و نصب ابزارهای شبکه
+    rm -f /etc/apt/sources.list.d/cloudflare*.list >/dev/null 2>&1
+    apt update -y && apt install -y curl unzip wget jq net-tools sshpass < /dev/null
     
-    cat <<EOT > /opt/khalifeh/configs/rathole-server.toml
-[server]
-bind_addr = "0.0.0.0:$port"
-default_token = "$token"
-[server.transport]
-type = "tcp"
-EOT
-
-    IFS=',' read -ra ADDR <<< "$ports"
-    for p in "${ADDR[@]}"; do
-        p=$(echo $p | xargs)
-        cat <<EOT >> /opt/khalifeh/configs/rathole-server.toml
-[server.services.port_$p]
-bind_addr = "0.0.0.0:$p"
-EOT
-    done
+    ARCH=$(uname -m)
+    if [[ "$ARCH" == "x86_64" ]]; then
+        URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-gnu.zip"
+    else
+        URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-aarch64-unknown-linux-gnu.zip"
+    fi
     
-    # تفکیک ساختاری دیمن به وسیله منبع فایل ایزوله برای جلوگیری از خطای سینتکس
-    cat <<EOT > /etc/systemd/system/khalifeh-rathole-server.service
-[Unit]
-Description=Khalifeh Rathole Server
-After=network.target khalifeh-local-proxy.service
-
-[Service]
-EnvironmentFile=-/opt/khalifeh/configs/proxy_env.conf
-ExecStart=/opt/khalifeh/bin/rathole /opt/khalifeh/configs/rathole-server.toml
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOT
-
-    systemctl daemon-reload
-    systemctl enable --now khalifeh-rathole-server
-    echo -e "${GREEN}[+] Iran Server active on tunnel port $port.${NC}"
-    echo -e "${YELLOW}[!] Secure Token for Kharej Node: $token${NC}"
-    read -p "Press Enter..."
+    curl -L "$URL" -o /tmp/rathole.zip
+    unzip -o /tmp/rathole.zip -d /tmp/
+    cp /tmp/rathole "$BIN_DIR/rathole"
+    chmod +x "$BIN_DIR/rathole"
+    rm -f /tmp/rathole.zip /tmp/rathole
 }
-rathole_kharej() {
-    read -p "Enter Iran Server IP: " ip
-    read -p "Enter Iran Bind Port [Default: 2333]: " port
-    port=${port:-2333}
-    read -p "Enter Token: " token
-    read -p "Enter local X-UI ports to forward (comma separated, e.g. 443,8080): " ports
+
+# ۲. پیکربندی سرور ایران + ایجاد دالان پروکسی از سرور خارج
+setup_iran() {
+    install_rathole
+    clear
+    echo -e "${CYAN}=== CONFIGURING IRAN SERVER (SERVER MODE + FIX PING) ===${NC}"
     
-    cat <<EOT > /opt/khalifeh/configs/rathole-client.toml
-[client]
-remote_addr = "$ip:$port"
-default_token = "$token"
-[client.transport]
-type = "tcp"
-EOT
-
-    IFS=',' read -ra ADDR <<< "$ports"
-    for p in "${ADDR[@]}"; do
-        p=$(echo $p | xargs)
-        cat <<EOT >> /opt/khalifeh/configs/rathole-client.toml
-[client.services.port_$p]
-local_addr = "127.0.0.1:$p"
-EOT
-    done
-
-    cat <<EOT > /etc/systemd/system/khalifeh-rathole-client.service
-[Unit]
-Description=Khalifeh Rathole Client
-After=network.target
-
-[Service]
-ExecStart=/opt/khalifeh/bin/rathole /opt/khalifeh/configs/rathole-client.toml
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOT
-
-    systemctl daemon-reload
-    systemctl enable --now khalifeh-rathole-client
-    echo -e "${GREEN}[+] Kharej Server successfully linked to Iran!${NC}"
-    read -p "Press Enter..."
-}
-EOF
-
-# =================================================================
-# ۲. ماژول پایدار فیکس پینگ و لایه پروکسی معکوس (ping_fix.sh)
-# =================================================================
-cat << 'EOF' > "$MOD_DIR/ping_fix.sh"
-#!/bin/bash
-proxy_fix_menu() {
-    while true; do
-        banner
-        echo -e "${YELLOW}=== FIX PING: Self-Hosted Kharej Proxy Engine ===${NC}"
-        echo "1) Build & Enable Proxy Link (Run this on IRAN Server)"
-        echo "2) Disable Proxy Routing"
-        echo "3) Test Connection Health & Latency"
-        echo "0) Back"
-        read -p "Selection: " cp
-        case $cp in
-            1) deploy_internal_proxy ;;
-            2) disable_internal_proxy ;;
-            3) clear; echo "[*] Testing latency to international gateway..."; curl -I -s --connect-timeout 4 https://www.google.com | head -n 1; read -p "Press Enter..." ;;
-            0) break ;;
-        esac
-    done
-}
-deploy_internal_proxy() {
-    echo -e "${CYAN}[*] Let's bridge Iran to your Kharej Server safely...${NC}"
-    read -p "Enter your KHAREJ Server IP: " kharej_ip
+    # الف) بخش راه‌اندازی پروکسی برای فیکس کردن پینگ سرور ایران از اینترنت سرور خارج
+    echo -e "${YELLOW}[*] To bypass filtering and fix ping, enter your KHAREJ server details:${NC}"
+    read -p "Enter KHAREJ Server IP: " kharej_ip
     read -p "Enter KHAREJ SSH Port [Default: 22]: " kharej_ssh_port
     kharej_ssh_port=${kharej_ssh_port:-22}
     read -p "Enter KHAREJ Root Password: " kharej_pass
 
-    cat <<EOT > /opt/khalifeh/configs/ssh_creds.conf
+    # ذخیره اطلاعات ورود به خارج برای پایداری ۱۰۰٪ پس از ریستارت سرور ایران
+    cat <<EOT > "$CFG_DIR/ssh_creds.conf"
 KHAREJ_IP="$kharej_ip"
 KHAREJ_PORT="$kharej_ssh_port"
 KHAREJ_PASS="$kharej_pass"
 EOT
-    chmod 600 /opt/khalifeh/configs/ssh_creds.conf
+    chmod 600 "$CFG_DIR/ssh_creds.conf"
 
-    echo -e "${YELLOW}[*] Generating highly secure SSH Tunnel Proxy on port 1080...${NC}"
-    
-    cat << 'RUNNER' > /opt/khalifeh/bin/proxy_runner.sh
+    # ساخت رانر ایزوله برای ایجاد تونل سوکس۵ (مستقر روی پورت ۱۰۸۰ سرور ایران)
+    cat << 'RUNNER' > "$BIN_DIR/proxy_runner.sh"
 #!/bin/bash
-source /opt/khalifeh/configs/ssh_creds.conf
+source /opt/khalifeh_tunnel/configs/ssh_creds.conf
 exec /usr/bin/sshpass -p "$KHAREJ_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -N -D 127.0.0.1:1080 root@$KHAREJ_IP -p $KHAREJ_PORT
 RUNNER
-    chmod +x /opt/khalifeh/bin/proxy_runner.sh
+    chmod +x "$BIN_DIR/proxy_runner.sh"
 
-    cat <<EOT > /etc/systemd/system/khalifeh-local-proxy.service
+    # ساخت سرویس سیستمی برای پروکسی معکوس سرور خارج
+    cat <<EOT > /etc/systemd/system/khalifeh-proxy.service
 [Unit]
-Description=Khalifeh Secure Fix-Ping Proxy Forwarder
+Description=Khalifeh Fix-Ping Proxy Corridor
 After=network.target
 
 [Service]
-ExecStart=/bin/bash /opt/khalifeh/bin/proxy_runner.sh
+ExecStart=/bin/bash $BIN_DIR/proxy_runner.sh
 Restart=always
 RestartSec=5
 
@@ -199,10 +91,11 @@ WantedBy=multi-user.target
 EOT
 
     systemctl daemon-reload
-    systemctl enable --now khalifeh-local-proxy
-    sleep 3
+    systemctl enable --now khalifeh-proxy.service
+    sleep 2
 
-    cat <<EOT > /opt/khalifeh/configs/proxy_env.conf
+    # ایجاد فایل محیطی پروکسی برای اینکه رتهول ایران اجباراً از داخل این دالان عبور کند
+    cat <<EOT > "$CFG_DIR/proxy_env.conf"
 http_proxy=socks5://127.0.0.1:1080
 https_proxy=socks5://127.0.0.1:1080
 all_proxy=socks5://127.0.0.1:1080
@@ -210,92 +103,141 @@ HTTP_PROXY=socks5://127.0.0.1:1080
 HTTPS_PROXY=socks5://127.0.0.1:1080
 EOT
 
-    cat <<EOT > /etc/profile.d/khalifeh_proxy.sh
-export http_proxy="socks5://127.0.0.1:1080"
-export https_proxy="socks5://127.0.0.1:1080"
-export all_proxy="socks5://127.0.0.1:1080"
+    # ب) بخش تنظیمات اصلی رتهول سرور (ایران)
+    echo -e "\n${CYAN}--------------------------------------------------------${NC}"
+    read -p "Enter a Port for Tunnel Connection [Default: 2333]: " bind_port
+    bind_port=${bind_port:-2333}
+    
+    echo -e "${YELLOW}[*] Enter the Inbound Ports from your X-UI (separated by comma, e.g., 443,8080):${NC}"
+    read -p "Ports: " ports_input
+    
+    token=$(openssl rand -hex 16)
+    
+    cat <<EOT > "$CFG_DIR/rathole-server.toml"
+[server]
+bind_addr = "0.0.0.0:$bind_port"
+default_token = "$token"
+
+[server.transport]
+type = "tcp"
 EOT
 
-    systemctl restart khalifeh-rathole-server >/dev/null 2>&1
-    echo -e "${GREEN}[+] SUCCESS: Server Iran is now fully proxied via Kharej Server!${NC}"
-    read -p "Press Enter to continue..."
-}
-disable_internal_proxy() {
-    systemctl stop khalifeh-local-proxy && systemctl disable khalifeh-local-proxy
-    rm -f /etc/profile.d/khalifeh_proxy.sh /opt/khalifeh/configs/proxy_env.conf /opt/khalifeh/configs/ssh_creds.conf
-    unset http_proxy https_proxy all_proxy
-    systemctl restart khalifeh-rathole-server >/dev/null 2>&1
-    echo -e "${RED}[- ] Internal Proxy Tunnel completely terminated.${NC}"
-    read -p "Press Enter..."
-}
-EOF
+    IFS=' ' read -r -a ports_array <<< "$(echo "$ports_input" | tr ',' ' ')"
+    for p in "${ports_array[@]}"; do
+        p=$(echo $p | xargs)
+        cat <<EOT >> "$CFG_DIR/rathole-server.toml"
 
-# =================================================================
-# ۳. ساختار بدنه و منوی اصلی (core.sh)
-# =================================================================
-cat << 'EOF' > "$BASE_DIR/core.sh"
-#!/bin/bash
-BASE="/opt/khalifeh"
-MOD="$BASE/modules"
-
-[[ -f "$MOD/rathole.sh" ]] && source "$MOD/rathole.sh"
-[[ -f "$MOD/ping_fix.sh" ]] && source "$MOD/ping_fix.sh"
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-YELLOW='\033[0;33m'
-MAGENTA='\033[0;35m'
-NC='\033[0m'
-
-banner() {
-    clear
-    echo -e "${MAGENTA}==================================================${NC}"
-    echo -e "${CYAN}     KHALIFEH PRO TUNNEL FRAMEWORK (FIX PING)     ${NC}"
-    echo -e "${MAGENTA}==================================================${NC}"
-}
-main_menu() {
-    while true; do
-        banner
-        echo -e "1) ${CYAN}Rathole Tunnel Core (Manage Ports)${NC}"
-        echo -e "2) ${YELLOW}Fix Connection Ping (Create Free Internal Proxy)${NC}"
-        echo "0) Exit CLI Session"
-        echo "--------------------------------------------------"
-        read -p "Select Menu Entry: " choice
-        case $choice in
-            1) rathole_menu ;;
-            2) proxy_fix_menu ;;
-            0) exit 0 ;;
-            *) echo "Invalid option." && sleep 1 ;;
-        esac
+[server.services.port_$p]
+bind_addr = "0.0.0.0:$p"
+EOT
     done
+
+    # ساخت سرویس سیستمی رتهول ایران (متصل به سرویس پروکسی خارج)
+    cat <<EOT > /etc/systemd/system/khalifeh-tunnel.service
+[Unit]
+Description=Khalifeh Rathole Tunnel Server (IRAN)
+After=network.target khalifeh-proxy.service
+
+[Service]
+EnvironmentFile=-/opt/khalifeh_tunnel/configs/proxy_env.conf
+ExecStart=$BIN_DIR/rathole $CFG_DIR/rathole-server.toml
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOT
+
+    systemctl daemon-reload
+    systemctl enable --now khalifeh-tunnel.service
+
+    clear
+    echo -e "${GREEN}[+] Iran Server Configured, Fix-Ping Proxy Enabled & Tunnel Started!${NC}"
+    echo -e "--------------------------------------------------------"
+    echo -e "${CYAN}👉 CRITICAL DATA FOR YOUR KHAREJ SERVER:${NC}"
+    echo -e "${YELLOW}Iran IP Address:${NC}  (Use your Iran Server IP)"
+    echo -e "${YELLOW}Iran Bind Port:${NC}  $bind_port"
+    echo -e "${YELLOW}Secure Token:${NC}    $token"
+    echo -e "${YELLOW}Ports Copied:${NC}    $ports_input"
+    echo -e "--------------------------------------------------------"
+    read -p "Copy these details safe, then press Enter to return to menu..."
 }
-EOF
 
-# =================================================================
-# ۴. دانلود و معماری سنجی باینری‌ها
-# =================================================================
-ARCH=$(uname -m)
-echo "[*] Downloading stable core binaries..."
-if [[ "$ARCH" == "x86_64" ]]; then
-    R_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-gnu.zip"
-else
-    R_URL="https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-aarch64-unknown-linux-gnu.zip"
-fi
-curl -Ls "$R_URL" -o /tmp/rathole.zip && unzip -o /tmp/rathole.zip -d /tmp/ && cp /tmp/rathole "$BIN_DIR/"
+# ۳. پیکربندی سرور خارج (نیاز به پروکسی ندارد، فقط رتهول کلاینت)
+setup_kharej() {
+    install_rathole
+    clear
+    echo -e "${CYAN}=== CONFIGURING KHAREJ SERVER (CLIENT MODE) ===${NC}"
+    read -p "Enter Iran Server IP: " iran_ip
+    read -p "Enter Iran Tunnel Bind Port [Default: 2333]: " bind_port
+    bind_port=${bind_port:-2333}
+    read -p "Enter Secure Token (generated on Iran Server): " token
+    
+    echo -e "${YELLOW}[*] Enter the EXACT same Inbound Ports you entered on Iran Server (separated by comma):${NC}"
+    read -p "Ports: " ports_input
 
-chmod +x $BIN_DIR/*
-chmod +x "$BASE_DIR"/core.sh
-chmod 755 "$MOD_DIR"/*.sh
+    cat <<EOT > "$CFG_DIR/rathole-client.toml"
+[client]
+remote_addr = "$iran_ip:$bind_port"
+default_token = "$token"
 
-# ساخت میانبر اصلی اوبونتو
-cat > /usr/local/bin/khalifeh << 'LAUNCHER'
-#!/bin/bash
-source /opt/khalifeh/core.sh
-main_menu
-LAUNCHER
-chmod +x /usr/local/bin/khalifeh
+[client.transport]
+type = "tcp"
+EOT
 
-clear
-echo -e "\033[0;32m[+] FULLY INSTALLED SUCCESSFULLY! \033[0m"
-echo -e "[*] Type \033[1;36mkhalifeh\033[0m anywhere to configure your system."
+    IFS=' ' read -r -a ports_array <<< "$(echo "$ports_input" | tr ',' ' ')"
+    for p in "${ADDR[@]}"; do
+    for p in "${ports_array[@]}"; do
+        p=$(echo $p | xargs)
+        cat <<EOT >> "$CFG_DIR/rathole-client.toml"
+
+[client.services.port_$p]
+local_addr = "127.0.0.1:$p"
+EOT
+    done
+
+    cat <<EOT > /etc/systemd/system/khalifeh-tunnel.service
+[Unit]
+Description=Khalifeh Rathole Tunnel Client (KHAREJ)
+After=network.target
+
+[Service]
+ExecStart=$BIN_DIR/rathole $CFG_DIR/rathole-client.toml
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOT
+
+    systemctl daemon-reload
+    systemctl enable --now khalifeh-tunnel.service
+
+    clear
+    echo -e "${GREEN}[+] Kharej Server Tunnel Deployed and Connected to Iran Successfully!${NC}"
+    read -p "Press Enter to return..."
+}
+
+# منوی اصلی اسکریپت
+while true; do
+    clear
+    echo -e "${CYAN}==================================================${NC}"
+    echo -e "${GREEN}      KHALIFEH RATHOLE TUNNEL (WITH PROXY CORRIDOR)  ${NC}"
+    echo -e "${CYAN}==================================================${NC}"
+    echo "1) Setup IRAN Server (Tunnel Server + Fix Ping via Kharej Proxy)"
+    echo "2) Setup KHAREJ Server (Tunnel Client Mode)"
+    echo "3) Check Tunnel Status / Logs"
+    echo "4) Stop All Services"
+    echo "0) Exit"
+    echo "--------------------------------------------------"
+    read -p "Please select an option: " opt
+    
+    case $opt in
+        1) setup_iran ;;
+        2) setup_kharej ;;
+        3) clear; echo "=== RATHOLE LOGS ==="; journalctl -u khalifeh-tunnel.service -n 25 --no-pager; echo -e "\n=== PROXY LOGS ==="; journalctl -u khalifeh-proxy.service -n 15 --no-pager; read -p "Press Enter..." ;;
+        4) systemctl stop khalifeh-tunnel.service khalifeh-proxy.service && echo -e "${RED}[-] All Services Stopped.${NC}" && sleep 2 ;;
+        0) exit 0 ;;
+        *) echo "Invalid option!" && sleep 1 ;;
+    esac
+done
