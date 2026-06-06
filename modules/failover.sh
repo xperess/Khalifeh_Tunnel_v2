@@ -1,28 +1,41 @@
 #!/bin/bash
 
-check_svc() {
-    systemctl is-active "$1" >/dev/null 2>&1
-    echo $?
-}
+check_svc() { systemctl is-active "$1" >/dev/null 2>&1; echo $?; }
 
-echo "[*] Auto Failover Engine Initialized..."
+echo "[*] Auto Failover Monitoring Agent Initialized..."
+
 while true; do
     R_SERVER=$(check_svc khalifeh-rathole-server)
     R_CLIENT=$(check_svc khalifeh-rathole-client)
     
-    # اگر یکی از سرویس‌های اصلی رتهول فعال بود
+    # اگر مسیر اصلی (Rathole) متصل و بدون مشکل کار می‌کند
     if [[ $R_SERVER -eq 0 || $R_CLIENT -eq 0 ]]; then
-        # چک کن اگر بک‌آپ‌ها روشن هستند، خاموششان کن (حفظ ترافیک و منابع)
-        if [[ $(check_svc frps) -eq 0 || $(check_svc frpc) -eq 0 ]]; then
-            echo "[▲] Primary route (Rathole) is back online. Stopping backup routes..."
-            systemctl stop frps frpc >/dev/null 2>&1
+        # لایه‌های فرعی بک‌آپ را خاموش نگه دار
+        systemctl stop frps frpc hysteria2 hysteria2-client >/dev/null 2>&1
+        sleep 8
+        continue
+    fi
+    
+    # اگر رتهول قطع شد، سوئیچ به اولویت دوم: FRP
+    echo "[!] Primary Tunnel (Rathole) is offline! Escalating to Fallback Level 1 (FRP)..."
+    if systemctl list-unit-files | grep -q "frps.service"; then
+        [[ $(check_svc frps) -ne 0 ]] && systemctl start frps
+    fi
+    if systemctl list-unit-files | grep -q "frpc.service"; then
+        [[ $(check_svc frpc) -ne 0 ]] && systemctl start frpc
+    fi
+    
+    sleep 6
+    
+    # اگر FRP هم در دسترس نبود، سوئیچ به لایه نهایی: Hysteria2
+    if [[ $(check_svc frps) -ne 0 && $(check_svc frpc) -ne 0 ]]; then
+        echo "[!!] Fallback 1 Failed! Activating Last Resort Layer (Hysteria2)..."
+        if systemctl list-unit-files | grep -q "hysteria2.service"; then
+            [[ $(check_svc hysteria2) -ne 0 ]] && systemctl start hysteria2
         fi
-    else
-        # اگر رتهول قطع بود، سوئیچ به مسیر پشتیبان FRP
-        if [[ $(check_svc frps) -ne 0 && $(check_svc frpc) -ne 0 ]]; then
-            echo "[▼] Primary route down! Activating FRP Backup Route..."
-            systemctl start frps frpc >/dev/null 2>&1
+        if systemctl list-unit-files | grep -q "hysteria2-client.service"; then
+            [[ $(check_svc hysteria2-client) -ne 0 ]] && systemctl start hysteria2-client
         fi
     fi
-    sleep 5
+    sleep 12
 done
