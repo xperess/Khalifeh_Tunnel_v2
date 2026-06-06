@@ -1,220 +1,103 @@
 #!/bin/bash
 
-RATHOLE_DIR="/opt/khalifeh"
-CONFIG_DIR="$RATHOLE_DIR/configs"
-BIN_DIR="$RATHOLE_DIR/bin"
-SERVICE_DIR="/etc/systemd/system"
-
-# ================================
-# INSTALL RATHOLE
-# ================================
-install_rathole() {
-
-echo "[*] Installing Rathole..."
-
-mkdir -p "$BIN_DIR"
-
-ARCH=$(uname -m)
-
-if [[ "$ARCH" == "x86_64" ]]; then
-    URL=$(curl -s https://api.github.com/repos/rapiz1/rathole/releases/latest | grep browser_download_url | grep x86_64 | cut -d '"' -f 4)
-elif [[ "$ARCH" == "aarch64" ]]; then
-    URL=$(curl -s https://api.github.com/repos/rapiz1/rathole/releases/latest | grep browser_download_url | grep aarch64 | cut -d '"' -f 4)
-else
-    echo "Unsupported arch"
-    exit 1
-fi
-
-curl -L "$URL" -o /tmp/rathole.zip
-unzip -o /tmp/rathole.zip -d /tmp/
-
-cp /tmp/rathole "$BIN_DIR/rathole"
-chmod +x "$BIN_DIR/rathole"
-
-echo "[+] Rathole installed"
+rathole_menu() {
+    while true; do
+        banner
+        echo -e "${CYAN}=== Rathole Config Module ===${NC}"
+        echo "1) Configure as IRAN (Server)"
+        echo "2) Configure as KHAREJ (Client)"
+        echo "3) Service Logs"
+        echo "0) Back to Main Menu"
+        read -p "Choice: " c
+        case $c in
+            1) rathole_iran ;;
+            2) rathole_kharej ;;
+            3) journalctl -u khalifeh-rathole-server -u khalifeh-rathole-client -n 50 --no-pager; read -p "Press Enter..." ;;
+            0) break ;;
+        esac
+    done
 }
 
-# ================================
-# GENERATE TOKEN
-# ================================
-generate_token() {
-openssl rand -hex 32
-}
-
-# ================================
-# CREATE IRAN SERVER
-# ================================
-create_iran_server() {
-
-echo "Enter tunnel port (default 2333): "
-read TPORT
-TPORT=${TPORT:-2333}
-
-echo "Enter service ports (comma separated): "
-read PORTS
-
-TOKEN=$(generate_token)
-
-CONFIG="$CONFIG_DIR/rathole-server.toml"
-mkdir -p "$CONFIG_DIR"
-
-cat > "$CONFIG" <<EOF
+rathole_iran() {
+    read -p "Enter Bind Port [Default: 2333]: " port
+    port=${port:-2333}
+    read -p "Enter Ports to forward (comma separated, e.g. 80,443): " ports
+    token=$(openssl rand -hex 16)
+    
+    cat <<EOF > /opt/khalifeh/configs/rathole-server.toml
 [server]
-bind_addr = "0.0.0.0:$TPORT"
-default_token = "$TOKEN"
-
+bind_addr = "0.0.0.0:$port"
+default_token = "$token"
 [server.transport]
 type = "tcp"
 EOF
 
-IFS=',' read -ra ADDR <<< "$PORTS"
-
-for p in "${ADDR[@]}"; do
-p=$(echo $p | xargs)
-cat >> "$CONFIG" <<EOF
-
-[server.services.port$p]
+    IFS=',' read -ra ADDR <<< "$ports"
+    for p in "${ADDR[@]}"; do
+        p=$(echo $p | xargs)
+        cat <<EOF >> /opt/khalifeh/configs/rathole-server.toml
+[server.services.port_$p]
 bind_addr = "0.0.0.0:$p"
 EOF
-done
+    done
 
-echo "[+] Server config created: $CONFIG"
-echo "[!] SAVE TOKEN: $TOKEN"
-}
-
-# ================================
-# CREATE KHAREJ CLIENT
-# ================================
-create_kharej_client() {
-
-echo "Enter Iran IP: "
-read IP
-
-echo "Enter tunnel port: "
-read TPORT
-
-echo "Enter service ports (comma separated): "
-read PORTS
-
-echo "Enter TOKEN: "
-read TOKEN
-
-CONFIG="$CONFIG_DIR/rathole-client.toml"
-
-cat > "$CONFIG" <<EOF
-[client]
-remote_addr = "$IP:$TPORT"
-default_token = "$TOKEN"
-
-[client.transport]
-type = "tcp"
-EOF
-
-IFS=',' read -ra ADDR <<< "$PORTS"
-
-for p in "${ADDR[@]}"; do
-p=$(echo $p | xargs)
-cat >> "$CONFIG" <<EOF
-
-[client.services.port$p]
-local_addr = "127.0.0.1:$p"
-EOF
-done
-
-echo "[+] Client config created: $CONFIG"
-}
-
-# ================================
-# SYSTEMD SERVER
-# ================================
-start_server_service() {
-
-SERVICE="/etc/systemd/system/khalifeh-rathole-server.service"
-
-cat > "$SERVICE" <<EOF
+    cat <<EOF > /etc/systemd/system/khalifeh-rathole-server.service
 [Unit]
 Description=Khalifeh Rathole Server
 After=network.target
 
 [Service]
-ExecStart=$BIN_DIR/rathole $CONFIG_DIR/rathole-server.toml
+ExecStart=/opt/khalifeh/bin/rathole /opt/khalifeh/configs/rathole-server.toml
 Restart=always
-LimitNOFILE=1048576
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-systemctl daemon-reload
-systemctl enable khalifeh-rathole-server
-systemctl start khalifeh-rathole-server
-
-echo "[+] Server started"
+    systemctl daemon-reload && systemctl enable --now khalifeh-rathole-server
+    echo -e "${GREEN}[+] Rathole Server Started on port $port.${NC}"
+    echo -e "${YELLOW}[!] Share this token with Client: $token${NC}"
+    read -p "Press Enter..."
 }
 
-# ================================
-# SYSTEMD CLIENT
-# ================================
-start_client_service() {
+rathole_kharej() {
+    read -p "Enter Iran Server IP: " ip
+    read -p "Enter Iran Bind Port [Default: 2333]: " port
+    port=${port:-2333}
+    read -p "Enter Token: " token
+    read -p "Enter local ports to map (comma separated, e.g. 80,443): " ports
 
-SERVICE="/etc/systemd/system/khalifeh-rathole-client.service"
+    cat <<EOF > /opt/khalifeh/configs/rathole-client.toml
+[client]
+remote_addr = "$ip:$port"
+default_token = "$token"
+[client.transport]
+type = "tcp"
+EOF
 
-cat > "$SERVICE" <<EOF
+    IFS=',' read -ra ADDR <<< "$ports"
+    for p in "${ADDR[@]}"; do
+        p=$(echo $p | xargs)
+        cat <<EOF >> /opt/khalifeh/configs/rathole-client.toml
+[client.services.port_$p]
+local_addr = "127.0.0.1:$p"
+EOF
+    done
+
+    cat <<EOF > /etc/systemd/system/khalifeh-rathole-client.service
 [Unit]
 Description=Khalifeh Rathole Client
 After=network.target
 
 [Service]
-ExecStart=$BIN_DIR/rathole $CONFIG_DIR/rathole-client.toml
+ExecStart=/opt/khalifeh/bin/rathole /opt/khalifeh/configs/rathole-client.toml
 Restart=always
-LimitNOFILE=1048576
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-systemctl daemon-reload
-systemctl enable khalifeh-rathole-client
-systemctl start khalifeh-rathole-client
-
-echo "[+] Client started"
-}
-
-# ================================
-# STATUS
-# ================================
-status() {
-systemctl status khalifeh-rathole-server --no-pager
-systemctl status khalifeh-rathole-client --no-pager
-}
-
-# ================================
-# MENU
-# ================================
-rathole_menu() {
-
-while true
-do
-echo ""
-echo "==== RATHOLE MENU ===="
-echo "1) Install Rathole"
-echo "2) Create Iran Server"
-echo "3) Create Kharej Client"
-echo "4) Start Server"
-echo "5) Start Client"
-echo "6) Status"
-echo "0) Back"
-read -p "Select: " c
-
-case $c in
-1) install_rathole ;;
-2) create_iran_server ;;
-3) create_kharej_client ;;
-4) start_server_service ;;
-5) start_client_service ;;
-6) status ;;
-0) break ;;
-esac
-
-done
+    systemctl daemon-reload && systemctl enable --now khalifeh-rathole-client
+    echo -e "${GREEN}[+] Rathole Client Configured and Connected.${NC}"
+    read -p "Press Enter..."
 }
