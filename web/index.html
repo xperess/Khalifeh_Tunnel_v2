@@ -1,49 +1,40 @@
 <!DOCTYPE html>
-<html lang="fa">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Khalifeh Tunnel Panel</title>
     <style>
-        body { background:#0d0d0d; color:#00ff33; font-family:monospace; padding:30px; direction: ltr; }
-        .box { padding:18px; border:1px solid #00ff33; margin:12px 0; background:#141414; border-radius:4px; }
-        button { background:#222; color:#00ff33; border:1px solid #00ff33; padding:6px 14px; cursor:pointer; margin-right:6px; font-family:monospace; font-weight:bold;}
-        button:hover { background:#00ff33; color:#111; }
-        .active { color: #00ff00; font-weight: bold; text-shadow: 0 0 5px #00ff00; }
-        .inactive { color: #ff0000; font-weight: bold; text-shadow: 0 0 5px #ff0000; }
+        body { background: #0c0f12; color: #4af626; font-family: 'Courier New', monospace; padding: 30px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .box { background: #131a22; border: 1px solid #1f2d3d; padding: 20px; border-radius: 6px; }
+        .active { color: #00ff88; font-weight: bold; }
+        .inactive { color: #ff3366; font-weight: bold; }
+        button { background: #1a2432; color: #4af626; border: 1px solid #4af626; padding: 6px 12px; cursor: pointer; margin-right: 5px; border-radius:4px;}
+        button:hover { background: #4af626; color: #0c0f12; }
     </style>
 </head>
 <body>
-<h2>🔥 Khalifeh Tunnel Secure Infrastructure Panel</h2>
-<div id="status">Syncing metrics with local nodes...</div>
-
-<script>
-async function loadStatus() {
-    try {
-        let res = await fetch('/api/status');
-        let data = await res.json();
-        let html = "";
-        for (let k in data) {
-            let statusClass = data[k] === "active" ? "active" : "inactive";
-            html += `
-            <div class="box">
-                <b>[Component Node]</b> ${k} : <span class="${statusClass}">${data[k].toUpperCase()}</span>
-                <br><br>
-                <button onclick="control('${k}', 'start')">START</button>
-                <button onclick="control('${k}', 'stop')">STOP</button>
-                <button onclick="control('${k}', 'restart')">RESTART</button>
-            </div>`;
+    <h2>🔥 KHALIFEH TUNNEL WEB DASHBOARD</h2>
+    <div class="grid" id="container"></div>
+    <script>
+        async function fetchStatus() {
+            let r = await fetch('/api/status');
+            let data = await r.json();
+            let html = '';
+            for (let svc in data) {
+                let cls = data[svc] === 'active' ? 'active' : 'inactive';
+                html += `<div class="box">
+                    <h3>📌 ${svc.replace('khalifeh-', '')}</h3>
+                    <p>Status: <span class="${cls}">${data[svc].toUpperCase()}</span></p>
+                    <button onclick="control('${svc}','start')">START</button>
+                    <button onclick="control('${svc}','stop')">STOP</button>
+                    <button onclick="control('${svc}','restart')">RESTART</button>
+                </div>`;
+            }
+            document.getElementById('container').innerHTML = html;
         }
-        document.getElementById("status").innerHTML = html;
-    } catch (e) {
-        document.getElementById("status").innerHTML = "<span class='inactive'>Failed to sync web panel state.</span>";
-    }
-}
-async function control(name, action) {
-    await fetch(`/api/${action}/${name}`);
-    loadStatus();
-}
-setInterval(loadStatus, 4000);
-loadStatus();
-</script>
+        async function control(name, act) { await fetch(`/api/${act}/${name}`); fetchStatus(); }
+        setInterval(fetchStatus, 4000); fetchStatus();
+    </script>
 </body>
 </html>
