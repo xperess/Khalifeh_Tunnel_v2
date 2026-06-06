@@ -4,7 +4,7 @@ BASE="/opt/khalifeh"
 MOD="$BASE/modules"
 CFG="$BASE/configs"
 
-# لود کردن ماژول‌ها به صورت امن
+# لود کردن ایمن و هماهنگ ماژول‌ها از پوشه اصلاح شده modules
 [[ -f "$MOD/rathole.sh" ]] && source "$MOD/rathole.sh"
 [[ -f "$MOD/frp.sh" ]] && source "$MOD/frp.sh"
 [[ -f "$MOD/hysteria2.sh" ]] && source "$MOD/hysteria2.sh"
@@ -19,65 +19,46 @@ NC='\033[0m'
 banner() {
     clear
     echo -e "${MAGENTA}==========================================${NC}"
-    echo -e "${CYAN}    KHALIFEH TUNNEL v2 (PRODUCTION)       ${NC}"
+    echo -e "${CYAN}   KHALIFEH TUNNEL v2 (BUG FIXED VERSION)${NC}"
     echo -e "${MAGENTA}==========================================${NC}"
 }
 
-health_check() {
+status_all() {
     banner
-    echo -e "${YELLOW}[*] Checking System Services Status:${NC}\n"
+    echo -e "${YELLOW}[*] Overall Infrastructure Status:${NC}\n"
     for svc in khalifeh-rathole-server khalifeh-rathole-client frps frpc hysteria2 hysteria2-client khalifeh-web khalifeh-failover; do
         if systemctl list-units --full -all 2>/dev/null | grep -q "$svc"; then
             STATUS=$(systemctl is-active "$svc" 2>/dev/null)
             if [[ "$STATUS" == "active" ]]; then
-                echo -e "$svc : ${GREEN}● ACTIVE${NC}"
+                echo -e " ● $svc : ${GREEN}RUNNING${NC}"
             else
-                echo -e "$svc : ${RED}○ INACTIVE${NC}"
+                echo -e " ● $svc : ${RED}STOPPED${NC}"
             fi
         else
-            echo -e "$svc : ${YELLOW}Not Configured${NC}"
+            echo -e " ● $svc : ${YELLOW}NOT INSTALLED${NC}"
         fi
     done
+    echo ""
     read -p "Press Enter to return..."
-}
-
-sys_optimize() {
-    banner
-    echo -e "${GREEN}[*] Optimizing Linux Network Stack for Tunneling...${NC}"
-    cat <<EOF > /etc/sysctl.d/99-khalifeh.conf
-fs.file-max = 65535
-net.core.rmem_max = 67108864
-net.core.wmem_max = 67108864
-net.core.netdev_max_backlog = 10000
-net.core.somaxconn = 4096
-net.ipv4.tcp_rmem = 4096 87380 67108864
-net.ipv4.tcp_wmem = 4096 65536 67108864
-net.ipv4.tcp_congestion_control = bbr
-EOF
-    sysctl --system >/dev/null 2>&1
-    echo -e "${GREEN}[+] BBR and network limits optimized successfully.${NC}"
-    read -p "Press Enter..."
 }
 
 main_menu() {
     while true; do
         banner
-        echo -e "1) ${CYAN}Rathole Module (Primary Tunnel)${NC}"
-        echo -e "2) ${CYAN}FRP Module (Backup Tunnel)${NC}"
-        echo -e "3) ${CYAN}Hysteria2 Module (Proxy/Tunnel)${NC}"
-        echo -e "4) ${YELLOW}System Health Check${NC}"
-        echo -e "5) ${GREEN}Network Optimize (BBR)${NC}"
-        echo -e "0) Exit"
+        echo "1) Rathole Tunnel Manager"
+        echo "2) FRP Tunnel Manager"
+        echo "3) Hysteria2 Module Manager"
+        echo "4) Real-time Nodes Status Overview"
+        echo "0) Exit"
         echo "------------------------------------------"
-        read -p "Select an option: " opt
-        case $opt in
-            1) rathole_menu ;;
-            2) frp_menu ;;
-            3) hysteria_menu ;;
-            4) health_check ;;
-            5) sys_optimize ;;
-            0) exit 0 ;;
-            *) echo "Invalid option"; sleep 1 ;;
+        read -p "Select option: " choice
+        case $choice in
+            1) declare -f rathole_menu >/dev/null && rathole_menu || (echo "Rathole sub-module linkage error" && sleep 2);;
+            2) declare -f frp_menu >/dev/null && frp_menu || (echo "FRP sub-module linkage error" && sleep 2);;
+            3) declare -f hysteria_menu >/dev/null && hysteria_menu || (echo "Hysteria2 sub-module linkage error" && sleep 2);;
+            4) status_all;;
+            0) exit 0;;
+            *) echo "Option outside range limits." && sleep 1;;
         esac
     done
 }
